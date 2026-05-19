@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>PISP Veri QR Okuyucu — Şirket Portalı</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0f; color: #f1f1f5; font-family: -apple-system, sans-serif; padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 32px; min-height: 100vh; }
+  h1 { color: #818cf8; font-size: 22px; }
+  p { color: #8b8ba7; font-size: 14px; text-align: center; max-width: 500px; }
+  .card { background: #16161f; border: 1px solid #1e1e2e; border-radius: 16px; padding: 28px; width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 18px; }
+  .drop-zone {
+    border: 2px dashed #2a2a3d; border-radius: 12px; padding: 40px;
+    text-align: center; cursor: pointer; transition: all 0.2s; background: #0e0e1a;
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: #6366f1; background: #1e1f3a; }
+  .drop-zone-icon { font-size: 40px; margin-bottom: 12px; }
+  .drop-zone-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .drop-zone-sub { font-size: 13px; color: #8b8ba7; }
+  input[type=file] { display: none; }
+  video, canvas { display: none; }
+
+  .scan-btn {
+    background: #6366f1; color: #fff; border: none; border-radius: 10px;
+    padding: 14px 32px; font-size: 15px; font-weight: 700; cursor: pointer; width: 100%;
+  }
+  .scan-btn:hover { background: #4f46e5; }
+  .stop-btn { background: #dc2626; }
+  .stop-btn:hover { background: #b91c1c; }
+
+  video#camPreview { display: block; width: 100%; border-radius: 12px; }
+
+  .result-card { display: none; flex-direction: column; gap: 0; width: 100%; max-width: 560px; }
+  .result-card.visible { display: flex; }
+  .result-header {
+    background: #052e16; border: 1px solid #22c55e; border-radius: 12px 12px 0 0;
+    padding: 16px 20px; display: flex; align-items: center; gap: 12px;
+  }
+  .result-badge { color: #22c55e; font-size: 18px; }
+  .result-company { font-size: 16px; font-weight: 700; color: #f1f1f5; }
+  .result-meta { font-size: 12px; color: #8b8ba7; margin-top: 2px; }
+  .result-body { background: #16161f; border: 1px solid #1e1e2e; border-top: none; border-radius: 0 0 12px 12px; }
+  .data-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #1e1e2e; }
+  .data-row:last-child { border-bottom: none; }
+  .data-label { font-size: 12px; color: #8b8ba7; text-transform: uppercase; letter-spacing: 0.8px; }
+  .data-value { font-size: 14px; color: #f1f1f5; font-weight: 500; text-align: right; max-width: 60%; }
+  .reset-btn {
+    background: #1e1e2e; color: #8b8ba7; border: 1px solid #2a2a3d; border-radius: 8px;
+    padding: 10px 24px; font-size: 13px; font-weight: 600; cursor: pointer; align-self: center; margin-top: 8px;
+  }
+  .reset-btn:hover { border-color: #6366f1; color: #f1f1f5; }
+  .error-msg { background: #2d0a0a; border: 1px solid #dc2626; border-radius: 10px; color: #fca5a5; font-size: 13px; padding: 14px 18px; display: none; }
+  .error-msg.visible { display: block; }
+</style>
+</head>
+<body>
+
+<h1>🏢 PISP Veri QR Okuyucu</h1>
+<p>Kullanıcının PISP uygulamasında oluşturduğu veri QR kodunu tara veya yükle.</p>
+
+<div class="card">
+  <!-- Kamera ile tara -->
+  <button class="scan-btn" id="camBtn" onclick="toggleCamera()">📷 Kamerayla Tara</button>
+  <video id="camPreview" autoplay playsinline style="display:none"></video>
+  <canvas id="camCanvas"></canvas>
+
+  <!-- Dosya yükle -->
+  <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+    <div class="drop-zone-icon">🖼</div>
+    <div class="drop-zone-title">QR görselini buraya sürükle</div>
+    <div class="drop-zone-sub">veya tıkla, PNG / JPG seç</div>
+  </div>
+  <input type="file" id="fileInput" accept="image/*">
+</div>
+
+<div class="error-msg" id="errorMsg"></div>
+
+<div class="result-card" id="resultCard">
+  <div class="result-header">
+    <div class="result-badge">✓</div>
+    <div>
+      <div class="result-company" id="resCompany"></div>
+      <div class="result-meta" id="resMeta"></div>
+    </div>
+  </div>
+  <div class="result-body" id="resBody"></div>
+  <button class="reset-btn" onclick="reset()">Yeni QR Tara</button>
+</div>
+
+<script>
+let cameraStream = null;
+let scanLoop = null;
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); processFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => processFile(fileInput.files[0]));
+
+function processFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById('camCanvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if (code) {
+        parsePayload(code.data);
+      } else {
+        showError('QR kod bulunamadı. Daha net bir görsel dene.');
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function toggleCamera() {
+  const btn = document.getElementById('camBtn');
+  const video = document.getElementById('camPreview');
+
+  if (cameraStream) {
+    stopCamera();
+    return;
+  }
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = cameraStream;
+    video.style.display = 'block';
+    btn.textContent = '⏹ Kamerayı Durdur';
+    btn.classList.add('stop-btn');
+    scanFromCamera();
+  } catch {
+    showError('Kamera erişimi reddedildi. Lütfen tarayıcıya kamera izni ver.');
+  }
+}
+
+function stopCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  if (scanLoop) { cancelAnimationFrame(scanLoop); scanLoop = null; }
+  const video = document.getElementById('camPreview');
+  video.style.display = 'none';
+  const btn = document.getElementById('camBtn');
+  btn.textContent = '📷 Kamerayla Tara';
+  btn.classList.remove('stop-btn');
+}
+
+function scanFromCamera() {
+  const video = document.getElementById('camPreview');
+  const canvas = document.getElementById('camCanvas');
+
+  function tick() {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if (code) {
+        stopCamera();
+        parsePayload(code.data);
+        return;
+      }
+    }
+    scanLoop = requestAnimationFrame(tick);
+  }
+  scanLoop = requestAnimationFrame(tick);
+}
+
+function parsePayload(raw) {
+  try {
+    const payload = JSON.parse(raw);
+    if (payload.protocol !== 'pisp.data.v1') {
+      showError('Bu bir PISP veri QR kodu değil.');
+      return;
+    }
+    showResult(payload);
+  } catch {
+    showError('QR içeriği okunamadı.');
+  }
+}
+
+function showResult(payload) {
+  document.getElementById('errorMsg').classList.remove('visible');
+  document.getElementById('resCompany').textContent = payload.company || '—';
+  const date = payload.issuedAt ? new Date(payload.issuedAt).toLocaleString('tr-TR') : '—';
+  document.getElementById('resMeta').textContent = `Teklif: ${payload.offerId}  ·  ${date}`;
+
+  const body = document.getElementById('resBody');
+  body.innerHTML = '';
+  const data = payload.data || {};
+  const entries = Object.entries(data);
+  if (entries.length === 0) {
+    body.innerHTML = '<div class="data-row"><span class="data-label">Veri yok</span></div>';
+  } else {
+    entries.forEach(([label, value]) => {
+      const row = document.createElement('div');
+      row.className = 'data-row';
+      row.innerHTML = `<span class="data-label">${label}</span><span class="data-value">${value}</span>`;
+      body.appendChild(row);
+    });
+  }
+
+  document.getElementById('resultCard').classList.add('visible');
+  document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+
+function reset() {
+  document.getElementById('resultCard').classList.remove('visible');
+  document.getElementById('errorMsg').classList.remove('visible');
+  fileInput.value = '';
+}
+</script>
+</body>
+</html>

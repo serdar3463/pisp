@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>PISP Şirket Teklif QR Oluşturucu</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0f; color: #f1f1f5; font-family: -apple-system, sans-serif; padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 32px; min-height: 100vh; }
+  h1 { color: #818cf8; font-size: 22px; }
+  p { color: #8b8ba7; font-size: 14px; text-align: center; max-width: 500px; }
+  .card { background: #16161f; border: 1px solid #1e1e2e; border-radius: 16px; padding: 28px; width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 18px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label { font-size: 12px; color: #8b8ba7; text-transform: uppercase; letter-spacing: 1px; }
+  input, select, textarea {
+    background: #0e0e1a; border: 1px solid #2a2a3d; border-radius: 8px; color: #f1f1f5;
+    font-size: 14px; padding: 10px 14px; width: 100%; outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #6366f1; }
+  textarea { resize: vertical; min-height: 72px; font-family: inherit; }
+  .row { display: flex; gap: 16px; }
+  .row .field { flex: 1; }
+  .hint { font-size: 12px; color: #5c5c7a; margin-top: 2px; }
+  button {
+    background: #6366f1; color: #fff; border: none; border-radius: 10px;
+    padding: 14px 32px; font-size: 15px; font-weight: 700; cursor: pointer; width: 100%;
+  }
+  button:hover { background: #4f46e5; }
+  .result { display: none; flex-direction: column; align-items: center; gap: 20px; width: 100%; max-width: 560px; }
+  .result.visible { display: flex; }
+  .qr-box { background: #fff; padding: 24px; border-radius: 16px; }
+  .payload-box {
+    background: #0e0e1a; border: 1px solid #2a2a3d; border-radius: 10px;
+    padding: 16px; font-family: monospace; font-size: 12px; color: #818cf8;
+    word-break: break-all; white-space: pre-wrap; width: 100%;
+  }
+  .dl-btn { background: #22c55e; }
+  .dl-btn:hover { background: #16a34a; }
+  .badge { background: #052e16; color: #22c55e; border: 1px solid #22c55e; border-radius: 999px; padding: 4px 14px; font-size: 12px; font-weight: 600; }
+  .fields-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .field-chip {
+    background: #1e1e2e; border: 1px solid #2a2a3d; border-radius: 6px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer; user-select: none;
+    transition: all 0.15s;
+  }
+  .field-chip.selected { background: #312e81; border-color: #6366f1; color: #c7d2fe; }
+</style>
+</head>
+<body>
+
+<h1>🏢 PISP Şirket Teklif QR Oluşturucu</h1>
+<p>Kullanıcıların PISP uygulamasında tarayabileceği veri talebi QR kodu oluştur.</p>
+
+<div class="card">
+  <div class="row">
+    <div class="field">
+      <label>Şirket Adı</label>
+      <input id="company" type="text" placeholder="Örn: TechRecruit A.Ş." />
+    </div>
+    <div class="field">
+      <label>Emoji Logo</label>
+      <input id="logo" type="text" placeholder="🏢" maxlength="2" style="width:80px" />
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Kategori</label>
+    <select id="category">
+      <option value="İK">İK — İnsan Kaynakları</option>
+      <option value="Sağlık">Sağlık</option>
+      <option value="Finans">Finans</option>
+      <option value="Araştırma">Araştırma</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>Teklif Açıklaması</label>
+    <textarea id="description" placeholder="Kullanıcıya gösterilecek kısa açıklama (örn: Yazılım geliştirici adayı profili için veri talebi)"></textarea>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label>Ödül (PISP Token)</label>
+      <input id="reward" type="number" min="1" max="1000" placeholder="50" />
+      <div class="hint">Kullanıcı bu kadar token kazanır</div>
+    </div>
+    <div class="field">
+      <label>Geçerlilik (Saat)</label>
+      <input id="expires" type="number" min="1" max="720" placeholder="48" />
+      <div class="hint">Teklifin kaç saat geçerli olacağı</div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>İstenen Veri Alanları</label>
+    <div class="fields-grid" id="fieldChips"></div>
+    <div class="hint" style="margin-top:8px">Talep etmek istediğin alanları seç</div>
+  </div>
+
+  <button onclick="generate()">QR Kodu Oluştur</button>
+</div>
+
+<div class="result" id="result">
+  <div class="badge">✓ PISP Teklif QR Hazır</div>
+  <div class="qr-box" id="qrContainer"></div>
+  <button class="dl-btn" onclick="downloadQR()">PNG olarak indir</button>
+  <div class="field" style="width:100%;max-width:560px">
+    <label>QR Payload (JSON)</label>
+    <div class="payload-box" id="payloadBox"></div>
+  </div>
+</div>
+
+<script>
+const FIELDS = [
+  { id: "fullName",       label: "Ad Soyad" },
+  { id: "email",          label: "E-posta" },
+  { id: "phone",          label: "Telefon" },
+  { id: "birthDate",      label: "Doğum Tarihi" },
+  { id: "role",           label: "Meslek / Rol" },
+  { id: "employer",       label: "İşveren" },
+  { id: "skills",         label: "Yetenekler" },
+  { id: "degree",         label: "Eğitim" },
+  { id: "linkedin",       label: "LinkedIn" },
+  { id: "github",         label: "GitHub" },
+  { id: "portfolio",      label: "Portföy" },
+  { id: "languages",      label: "Diller" },
+  { id: "bloodType",      label: "Kan Grubu" },
+  { id: "allergies",      label: "Alerjiler" },
+  { id: "medications",    label: "İlaçlar" },
+  { id: "chronicConditions", label: "Kronik Hastalık" },
+  { id: "taxStatus",      label: "Vergi Durumu" },
+  { id: "incomeBand",     label: "Gelir Aralığı" },
+  { id: "creditRange",    label: "Kredi Notu" },
+  { id: "fitnessMetric",  label: "Sağlık / Fitness" },
+];
+
+const selected = new Set();
+const grid = document.getElementById('fieldChips');
+FIELDS.forEach(f => {
+  const chip = document.createElement('div');
+  chip.className = 'field-chip';
+  chip.textContent = f.label;
+  chip.dataset.id = f.id;
+  chip.onclick = () => {
+    if (selected.has(f.id)) { selected.delete(f.id); chip.classList.remove('selected'); }
+    else { selected.add(f.id); chip.classList.add('selected'); }
+  };
+  grid.appendChild(chip);
+});
+
+function generate() {
+  const company = document.getElementById('company').value.trim();
+  const logo = document.getElementById('logo').value.trim() || '🏢';
+  const category = document.getElementById('category').value;
+  const description = document.getElementById('description').value.trim();
+  const reward = parseInt(document.getElementById('reward').value) || 50;
+  const expires = parseInt(document.getElementById('expires').value) || 48;
+
+  if (!company) { alert('Şirket adı zorunlu'); return; }
+  if (!description) { alert('Açıklama zorunlu'); return; }
+  if (selected.size === 0) { alert('En az bir veri alanı seç'); return; }
+
+  const id = 'offer-' + company.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now();
+
+  const payload = {
+    protocol: "pisp.offer.v1",
+    id,
+    company,
+    logo,
+    category,
+    description,
+    fieldIds: Array.from(selected),
+    reward,
+    expiresInHours: expires
+  };
+
+  const json = JSON.stringify(payload);
+
+  document.getElementById('qrContainer').innerHTML = '';
+  new QRCode(document.getElementById('qrContainer'), {
+    text: json,
+    width: 280,
+    height: 280,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+
+  document.getElementById('payloadBox').textContent = JSON.stringify(payload, null, 2);
+  document.getElementById('result').classList.add('visible');
+  document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
+}
+
+function downloadQR() {
+  const img = document.querySelector('#qrContainer img');
+  if (!img) return;
+  const a = document.createElement('a');
+  a.href = img.src;
+  a.download = 'pisp-offer-qr.png';
+  a.click();
+}
+</script>
+</body>
+</html>

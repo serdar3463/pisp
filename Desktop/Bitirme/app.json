@@ -1,0 +1,91 @@
+{
+  "expo": {
+    "name": "PISP",
+    "slug": "pisp-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "scheme": "pisp",
+    "description": "Kişisel bilgilerini cihazında şifreli tutan, QR ile minimum bilgi paylaşımı sağlayan kişisel veri egemenliği uygulaması.",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0f"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pisp.mobile",
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "PISP, QR tabanlı güvenli bilgi aktarımı için kamerayı kullanır.",
+        "NSFaceIDUsageDescription": "PISP, şifreli yerel kasanı açmak için Face ID kullanır.",
+        "NSContactsUsageDescription": "PISP, iletişim bilgilerini kasana kolayca aktarman için rehberine erişir.",
+        "NSPhotoLibraryUsageDescription": "PISP, belge eklemek için fotoğraf kitaplığına erişir.",
+        "NSPrivacyAccessedAPITypes": []
+      },
+      "privacyManifests": {
+        "NSPrivacyCollectedDataTypes": [],
+        "NSPrivacyAccessedAPITypes": []
+      }
+    },
+    "android": {
+      "package": "com.pisp.mobile",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "READ_CONTACTS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0a0f"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "PISP, QR tabanlı güvenli bilgi aktarımı için kamerayı kullanır."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "PISP, şifreli yerel kasanı açmak için Face ID kullanır."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "PISP, iletişim bilgilerini kasana kolayca aktarman için rehberine erişir."
+        }
+      ]
+    ],
+    "extra": {
+      "privacyPolicyUrl": "FILL_GITHUB_PAGES_URL/privacy.html",
+      "supportEmail": "serdarsimiek@gmail.com",
+      "dataDeletionUrl": "FILL_GITHUB_PAGES_URL/delete-data.html",
+      "eas": {
+        "projectId": "c72cfc01-c10e-42ba-8af7-4b3387e9dc5d"
+      }
+    },
+    "owner": "serdar3463"
+  }
+}

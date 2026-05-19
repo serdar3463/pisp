@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PISP — Gizlilik Politikası</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; max-width: 680px; margin: 60px auto; padding: 0 24px; color: #1a1a2e; line-height: 1.7; }
+    h1 { font-size: 28px; font-weight: 900; }
+    h2 { font-size: 18px; font-weight: 700; margin-top: 32px; }
+    p, li { color: #444; }
+    a { color: #6366f1; }
+    .back { display:inline-block; margin-bottom:24px; color:#6366f1; text-decoration:none; font-size:14px; }
+    .updated { font-size: 13px; color: #999; margin-bottom: 32px; }
+  </style>
+</head>
+<body>
+  <a class="back" href="index.html">← Ana Sayfa</a>
+  <h1>Gizlilik Politikası</h1>
+  <p class="updated">Son güncelleme: 19 Mayıs 2026</p>
+
+  <h2>Özet</h2>
+  <p>PISP, kişisel bilgilerini yalnızca cihazında şifreli olarak saklayan yerel öncelikli bir uygulamadır. Kişisel verilerin sunucularımıza gönderilmez; paylaşım yalnızca senin açık onayınla gerçekleşir.</p>
+
+  <h2>Cihazında Saklanan Veriler</h2>
+  <p>Aşağıdaki veriler yalnızca cihazında yerel olarak saklanır ve sunucularımıza gönderilmez:</p>
+  <ul>
+    <li>Kasana girdiğin kişisel bilgiler (ad, e-posta, doğum tarihi vb.)</li>
+    <li>Onay ve paylaşım politikası ayarları</li>
+    <li>QR tabanlı paylaşım geçmişi</li>
+    <li>Egemenlik defteri kayıtları (yalnızca SHA-256 hash — ham veri içermez)</li>
+    <li>Cihaz kimlik anahtarı (işletim sistemi güvenli depolamasında)</li>
+  </ul>
+
+  <h2>Sunucuya Gönderilen Veriler</h2>
+  <p>Pazar yeri özelliği kullanıldığında yalnızca şu veriler sunucumuza iletilir:</p>
+  <ul>
+    <li>Cihaz kimliğinin SHA-256 hash'i (ham cihaz ID asla saklanmaz)</li>
+    <li>Teklif kabul kaydı (hangi teklifi kabul ettiğin — içerik değil)</li>
+    <li>Token çekim talebi tutarı</li>
+  </ul>
+  <p>Kişisel bilgilerin (ad, adres, sağlık verisi vb.) hiçbiri sunucularımıza gönderilmez.</p>
+
+  <h2>QR Paylaşımı</h2>
+  <p>Bir şirketin QR kodunu okuttuğunda, paylaşım isteği önce yerel olarak doğrulanır. Hangi alanların talep edildiğini, amacını ve alıcıyı görürsün. Onay vermeden hiçbir veri paylaşılmaz.</p>
+
+  <h2>Kamera ve Biyometri</h2>
+  <p>Kamera yalnızca QR kodu okumak için kullanılır; görüntüler kaydedilmez. Face ID/Touch ID yalnızca yerel kasayı açmak için kullanılır; biyometrik verin Apple'ın Secure Enclave'inde saklanır, bize gönderilmez.</p>
+
+  <h2>Veri Silme</h2>
+  <p>Uygulama içinden "Kasayı Sil" seçeneğiyle tüm yerel verilerini kalıcı olarak silebilirsin. Sunucu tarafındaki kayıtlar için <a href="delete-data.html">Veri Silme Talebi</a> sayfasını kullan.</p>
+
+  <h2>Çocukların Gizliliği</h2>
+  <p>PISP 13 yaş altı kullanıcılara yönelik değildir. Bilerek bu yaş grubundan veri toplamayız.</p>
+
+  <h2>İletişim</h2>
+  <p>Gizlilik ile ilgili sorularını <a href="mailto:serdarsimiek@gmail.com">serdarsimiek@gmail.com</a> adresine iletebilirsin.</p>
+</body>
+</html>

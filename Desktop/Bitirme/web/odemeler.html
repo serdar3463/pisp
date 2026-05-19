@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PISP — Tokenlarını Çevir</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav>
+    <div class="inner">
+      <div class="brand">
+        <div class="brand-mark">P</div>
+        <span class="brand-name">PISP</span>
+        <span class="brand-tag">Ödeme Merkezi</span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page-narrow" style="padding-top:48px; padding-bottom:60px;">
+    <div style="text-align:center; margin-bottom:32px;">
+      <p style="font-size:48px; margin-bottom:12px;">💎</p>
+      <h1 style="font-size:24px; font-weight:900; margin-bottom:8px;">Tokenlarını TL'ye Çevir</h1>
+      <p class="text-secondary" style="font-size:14px;">PISP uygulamasında kazandığın tokenları IBAN'ına aktar.</p>
+    </div>
+
+    <div class="card flex-col gap-md" id="step-request">
+      <div id="req-error" class="alert alert-error"></div>
+      <div id="req-success" class="alert alert-success"></div>
+
+      <div class="card" style="background:var(--bg-elevated); border-color:var(--accent); padding:16px;">
+        <p class="text-xs text-secondary" style="margin-bottom:4px; text-transform:uppercase; letter-spacing:1px;">Oran</p>
+        <p style="font-size:22px; font-weight:900; color:var(--accent-light);">1 💎 = 0.10 ₺</p>
+        <p class="text-xs text-tertiary" style="margin-top:4px;">Minimum çekim: 100 💎 (10 ₺)</p>
+      </div>
+
+      <div class="form-group">
+        <label>İstek ID (PISP uygulamasından aldığınız)</label>
+        <input id="w-request-id" placeholder="pisp-req-xxxxxxxx" />
+        <span class="form-hint">Uygulamada Cüzdan → Çekim Talebi → İstek ID</span>
+      </div>
+      <div class="form-group">
+        <label>IBAN</label>
+        <input id="w-iban" placeholder="TR00 0000 0000 0000 0000 0000 00" oninput="formatIBAN(this)" maxlength="32" />
+      </div>
+      <div class="form-group">
+        <label>Ad Soyad (IBAN sahibi)</label>
+        <input id="w-name" placeholder="AD SOYAD" style="text-transform:uppercase;" />
+      </div>
+
+      <button class="btn btn-primary" onclick="submitWithdrawal()">Çekim Talebi Gönder</button>
+      <p class="text-xs text-tertiary text-center">IBAN bilgileriniz işlem sonrası sistemimizde saklanmaz. İşlem 1-3 iş günü sürebilir.</p>
+    </div>
+
+    <div class="card hidden" id="step-status" style="margin-top:24px; text-align:center; padding:32px;">
+      <p style="font-size:40px; margin-bottom:16px;" id="status-icon">⏳</p>
+      <h2 style="font-size:20px; font-weight:800; margin-bottom:8px;" id="status-title">Talebiniz Alındı</h2>
+      <p class="text-secondary text-sm" id="status-body">1-3 iş günü içinde ödeme yapılacak.</p>
+      <div class="card" style="background:var(--bg-elevated); margin-top:20px; text-align:left; padding:14px;">
+        <p class="text-xs text-tertiary" style="margin-bottom:4px;">TALEP TARİHİ</p>
+        <p class="text-sm fw-bold" id="status-date">—</p>
+      </div>
+    </div>
+
+    <!-- Check existing request -->
+    <div class="card" style="margin-top:24px;">
+      <h3 style="font-size:14px; font-weight:700; margin-bottom:12px;">Mevcut talebi sorgula</h3>
+      <div class="flex gap-sm">
+        <input id="check-id" placeholder="İstek ID" style="flex:1;" />
+        <button class="btn btn-secondary btn-sm" onclick="checkStatus()">Sorgula</button>
+      </div>
+      <div id="check-result" class="alert" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    function formatIBAN(input) {
+      const raw = input.value.replace(/\s/g, "").toUpperCase();
+      input.value = raw.replace(/(.{4})/g, "$1 ").trim().slice(0, 32);
+    }
+
+    async function submitWithdrawal() {
+      const requestId = document.getElementById("w-request-id").value.trim();
+      const iban = document.getElementById("w-iban").value.replace(/\s/g, "");
+      const name = document.getElementById("w-name").value.trim();
+      const errEl = document.getElementById("req-error");
+      const okEl = document.getElementById("req-success");
+      errEl.classList.remove("show"); okEl.classList.remove("show");
+
+      if (!requestId || !iban || !name) {
+        errEl.textContent = "Tüm alanları doldurun.";
+        errEl.classList.add("show"); return;
+      }
+      if (!iban.startsWith("TR") || iban.length !== 26) {
+        errEl.textContent = "Geçerli bir Türk IBAN'ı girin (TR ile başlamalı, 26 karakter).";
+        errEl.classList.add("show"); return;
+      }
+
+      try {
+        const data = await api.patch(`/api/withdrawals/${requestId}/iban`, { iban, holderName: name });
+        okEl.textContent = "IBAN kaydedildi. Ödemeniz işleme alındı — 1-3 iş günü içinde hesabınıza yatacak.";
+        okEl.classList.add("show");
+        document.getElementById("step-status").classList.remove("hidden");
+        document.getElementById("status-date").textContent = new Date(data.requestedAt).toLocaleDateString("tr-TR");
+        updateStatusUI(data.status);
+      } catch(e) {
+        errEl.textContent = e.message;
+        errEl.classList.add("show");
+      }
+    }
+
+    async function checkStatus() {
+      const id = document.getElementById("check-id").value.trim();
+      const el = document.getElementById("check-result");
+      el.className = "alert";
+      if (!id) return;
+      try {
+        const data = await api.get(`/api/withdrawals/${id}/status`);
+        const labels = { pending: "Beklemede", processing: "İşleniyor", completed: "Tamamlandı", rejected: "Reddedildi" };
+        el.textContent = `Durum: ${labels[data.status] ?? data.status} · Talep: ${new Date(data.requestedAt).toLocaleDateString("tr-TR")}`;
+        el.classList.add("show", data.status === "completed" ? "alert-success" : "alert-error");
+      } catch(e) {
+        el.textContent = e.message;
+        el.classList.add("show", "alert-error");
+      }
+    }
+
+    function updateStatusUI(status) {
+      const icons = { pending: "⏳", processing: "🔄", completed: "✅", rejected: "❌" };
+      const titles = { pending: "Talebiniz Alındı", processing: "İşleniyor", completed: "Ödeme Yapıldı", rejected: "Talep Reddedildi" };
+      const bodies = {
+        pending: "1-3 iş günü içinde ödeme yapılacak.",
+        processing: "Ödemeniz işleme alındı.",
+        completed: "Tutar IBAN'ınıza yatırıldı.",
+        rejected: "Talebiniz reddedildi. Destek için destek@pisp.app adresine yazın."
+      };
+      document.getElementById("status-icon").textContent = icons[status] ?? "⏳";
+      document.getElementById("status-title").textContent = titles[status] ?? status;
+      document.getElementById("status-body").textContent = bodies[status] ?? "";
+    }
+  </script>
+</body>
+</html>
