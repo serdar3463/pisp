@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>PISP Icon Generator</title>
+<style>
+  body { background: #111; color: #fff; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; gap: 32px; padding: 40px; }
+  h1 { color: #818cf8; font-size: 22px; margin: 0; }
+  .grid { display: flex; gap: 40px; flex-wrap: wrap; justify-content: center; }
+  .asset { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  canvas { border-radius: 22px; box-shadow: 0 8px 48px rgba(99,102,241,0.5); }
+  button { background: #6366f1; color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 14px; font-weight: 700; cursor: pointer; }
+  button:hover { background: #4f46e5; }
+  label { font-size: 11px; color: #8b8ba7; text-transform: uppercase; letter-spacing: 1.5px; }
+</style>
+</head>
+<body>
+<h1>PISP Icon Generator</h1>
+<div class="grid">
+  <div class="asset">
+    <label>icon.png — 1024×1024</label>
+    <canvas id="c1" width="1024" height="1024" style="width:220px;height:220px"></canvas>
+    <button onclick="dl('c1','icon.png')">İndir → assets/icon.png</button>
+  </div>
+  <div class="asset">
+    <label>adaptive-icon.png — 1024×1024</label>
+    <canvas id="c2" width="1024" height="1024" style="width:220px;height:220px"></canvas>
+    <button onclick="dl('c2','adaptive-icon.png')">İndir → assets/adaptive-icon.png</button>
+  </div>
+  <div class="asset">
+    <label>splash.png — 2048×2048</label>
+    <canvas id="c3" width="2048" height="2048" style="width:220px;height:220px"></canvas>
+    <button onclick="dl('c3','splash.png')">İndir → assets/splash.png</button>
+  </div>
+  <div class="asset">
+    <label>favicon.png — 48×48</label>
+    <canvas id="c4" width="48" height="48" style="width:96px;height:96px;image-rendering:pixelated;border-radius:6px"></canvas>
+    <button onclick="dl('c4','favicon.png')">İndir → assets/favicon.png</button>
+  </div>
+</div>
+
+<script>
+function drawIcon(canvas, opts = {}) {
+  const { splash = false, adaptive = false } = opts;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // ── Arka plan ──────────────────────────────────────────
+  const bg = ctx.createLinearGradient(0, 0, W * 0.6, H);
+  bg.addColorStop(0, '#0f0f1a');
+  bg.addColorStop(1, '#1a1a2e');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Subtle grid desen (arka planda) ────────────────────
+  ctx.save();
+  ctx.strokeStyle = 'rgba(99,102,241,0.06)';
+  ctx.lineWidth = W * 0.001;
+  const step = W * 0.08;
+  for (let x = 0; x < W; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y < H; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.restore();
+
+  const cx = W / 2;
+  const cy = splash ? H * 0.45 : H / 2;
+  const scale = adaptive ? 0.62 : splash ? 0.3 : 0.72;
+  const R = W * scale;
+
+  // ── Dış glow halkası ───────────────────────────────────
+  const outerGlow = ctx.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 1.1);
+  outerGlow.addColorStop(0, 'rgba(99,102,241,0.20)');
+  outerGlow.addColorStop(0.6, 'rgba(99,102,241,0.08)');
+  outerGlow.addColorStop(1, 'rgba(99,102,241,0)');
+  ctx.fillStyle = outerGlow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R * 1.1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── Kalkan çiz ─────────────────────────────────────────
+  function shieldPath(x, y, w, h) {
+    const t = y - h / 2, b = y + h / 2;
+    const l = x - w / 2, r = x + w / 2;
+    const notch = h * 0.16;
+    const curveDepth = h * 0.28;
+    ctx.beginPath();
+    ctx.moveTo(x, t);
+    ctx.lineTo(r, t + notch);
+    ctx.lineTo(r, b - curveDepth);
+    ctx.quadraticCurveTo(r, b, x, b);
+    ctx.quadraticCurveTo(l, b, l, b - curveDepth);
+    ctx.lineTo(l, t + notch);
+    ctx.closePath();
+  }
+
+  const sw = R * 0.82, sh = R * 0.96;
+
+  // Kalkan gölge
+  ctx.save();
+  ctx.shadowColor = 'rgba(79,70,229,0.7)';
+  ctx.shadowBlur = W * 0.07;
+  ctx.shadowOffsetY = W * 0.02;
+  shieldPath(cx, cy, sw, sh);
+  ctx.fillStyle = '#4f46e5';
+  ctx.fill();
+  ctx.restore();
+
+  // Kalkan ana gradient
+  const shieldGrad = ctx.createLinearGradient(cx - sw/2, cy - sh/2, cx + sw/2, cy + sh/2);
+  shieldGrad.addColorStop(0, '#818cf8');
+  shieldGrad.addColorStop(0.35, '#6366f1');
+  shieldGrad.addColorStop(1, '#3730a3');
+  shieldPath(cx, cy, sw, sh);
+  ctx.fillStyle = shieldGrad;
+  ctx.fill();
+
+  // Kalkan iç parlaklık (sol üst köşe)
+  const gloss = ctx.createLinearGradient(cx - sw*0.4, cy - sh*0.45, cx + sw*0.1, cy + sh*0.1);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.18)');
+  gloss.addColorStop(1, 'rgba(255,255,255,0)');
+  shieldPath(cx, cy, sw, sh);
+  ctx.fillStyle = gloss;
+  ctx.fill();
+
+  // Kalkan kenarlık
+  shieldPath(cx, cy, sw, sh);
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = W * 0.006;
+  ctx.stroke();
+
+  // ── "P" harfi ──────────────────────────────────────────
+  const fontSize = sh * 0.54;
+  ctx.save();
+  ctx.font = `900 ${fontSize}px -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // P gölgesi
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
+  ctx.shadowBlur = W * 0.025;
+  ctx.shadowOffsetY = W * 0.012;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('P', cx, cy - sh * 0.04);
+  ctx.restore();
+
+  // ── Küçük kilit ikonu (P'nin altında) ─────────────────
+  const lx = cx, ly = cy + sh * 0.36;
+  const lw = sw * 0.22, lh = sw * 0.15;
+  const lr = lw * 0.28;
+
+  // Kilit gövde
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.30)';
+  ctx.beginPath();
+  const lx1 = lx - lw/2, ly1 = ly - lh*0.3;
+  ctx.roundRect(lx1, ly1, lw, lh * 1.1, [lr]);
+  ctx.fill();
+
+  // Kilit deliği
+  ctx.fillStyle = 'rgba(99,102,241,0.8)';
+  ctx.beginPath();
+  ctx.arc(lx, ly1 + lh * 0.45, lw * 0.15, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Kilit yay
+  ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+  ctx.lineWidth = W * 0.012;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(lx, ly1, lw * 0.32, Math.PI, 0);
+  ctx.stroke();
+  ctx.restore();
+
+  // ── Splash modunda yazı ───────────────────────────────
+  if (splash) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.font = `800 ${W * 0.072}px -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 10;
+    ctx.fillText('PISP', cx, cy + sh * 0.62 + W * 0.06);
+
+    ctx.font = `400 ${W * 0.032}px -apple-system, "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.shadowBlur = 0;
+    ctx.fillText('Kişisel Veri Kasası', cx, cy + sh * 0.62 + W * 0.13);
+    ctx.restore();
+  }
+}
+
+drawIcon(document.getElementById('c1'));
+drawIcon(document.getElementById('c2'), { adaptive: true });
+drawIcon(document.getElementById('c3'), { splash: true });
+drawIcon(document.getElementById('c4'));
+
+function dl(id, name) {
+  const a = document.createElement('a');
+  a.download = name;
+  a.href = document.getElementById(id).toDataURL('image/png');
+  a.click();
+}
+</script>
+</body>
+</html>

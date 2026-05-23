@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>PISP Screenshot Resizer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0f; color: #f1f1f5; font-family: -apple-system, sans-serif; padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 32px; min-height: 100vh; }
+  h1 { color: #818cf8; font-size: 22px; }
+  p { color: #8b8ba7; font-size: 14px; text-align: center; }
+  .target-info { background: #16161f; border: 1px solid #1e1e2e; border-radius: 12px; padding: 16px 24px; display: flex; gap: 32px; }
+  .target-item { text-align: center; }
+  .target-size { font-size: 18px; font-weight: 700; color: #818cf8; }
+  .target-label { font-size: 11px; color: #8b8ba7; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+  .drop-zone {
+    width: 100%; max-width: 600px;
+    border: 2px dashed #2a2a3d;
+    border-radius: 16px;
+    padding: 48px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #16161f;
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: #6366f1; background: #1e1f3a; }
+  .drop-zone-icon { font-size: 48px; margin-bottom: 16px; }
+  .drop-zone-title { font-size: 16px; font-weight: 600; color: #f1f1f5; margin-bottom: 8px; }
+  .drop-zone-sub { font-size: 13px; color: #8b8ba7; }
+  input[type=file] { display: none; }
+  .results { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 16px; }
+  .result-card {
+    background: #16161f;
+    border: 1px solid #1e1e2e;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .result-card img { height: 80px; border-radius: 8px; object-fit: cover; }
+  .result-info { flex: 1; }
+  .result-name { font-size: 14px; font-weight: 600; color: #f1f1f5; margin-bottom: 4px; }
+  .result-size { font-size: 12px; color: #8b8ba7; }
+  .result-badge { font-size: 11px; background: #052e16; color: #22c55e; border: 1px solid #22c55e; border-radius: 999px; padding: 2px 10px; margin-top: 4px; display: inline-block; }
+  .download-btn {
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .download-btn:hover { background: #4f46e5; }
+  .download-all-btn {
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 14px 40px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    width: 100%;
+    max-width: 400px;
+  }
+  .download-all-btn:hover { background: #4f46e5; }
+  .status { font-size: 13px; color: #22c55e; }
+  canvas { display: none; }
+</style>
+</head>
+<body>
+
+<h1>📱 PISP Screenshot Resizer</h1>
+<p>Ekran görüntülerini App Store boyutuna otomatik dönüştürür</p>
+
+<div class="target-info">
+  <div class="target-item">
+    <div class="target-size">1284 × 2778</div>
+    <div class="target-label">Hedef boyut (6.7")</div>
+  </div>
+  <div class="target-item">
+    <div class="target-size">App Store</div>
+    <div class="target-label">iPhone 14 Plus uyumlu</div>
+  </div>
+  <div class="target-item">
+    <div class="target-size">PNG</div>
+    <div class="target-label">Format</div>
+  </div>
+</div>
+
+<div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+  <div class="drop-zone-icon">🖼</div>
+  <div class="drop-zone-title">Ekran görüntülerini buraya sürükle</div>
+  <div class="drop-zone-sub">veya tıkla, birden fazla dosya seçebilirsin</div>
+</div>
+<input type="file" id="fileInput" accept="image/*" multiple>
+
+<div class="results" id="results"></div>
+<canvas id="workCanvas"></canvas>
+
+<script>
+const TARGET_W = 1284;
+const TARGET_H = 2778;
+const results = [];
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const resultsEl = document.getElementById('results');
+const canvas = document.getElementById('workCanvas');
+const ctx = canvas.getContext('2d');
+
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); processFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', () => processFiles(fileInput.files));
+
+function processFiles(files) {
+  Array.from(files).forEach(processFile);
+}
+
+function processFile(file) {
+  if (!file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      // Resize
+      canvas.width  = TARGET_W;
+      canvas.height = TARGET_H;
+
+      // Hesapla: orijinali hedef canvas'a sığdır (cover)
+      const srcRatio = img.width / img.height;
+      const dstRatio = TARGET_W / TARGET_H;
+
+      let sx, sy, sw, sh;
+      if (srcRatio > dstRatio) {
+        // Daha geniş — yatayı kırp
+        sh = img.height;
+        sw = img.height * dstRatio;
+        sx = (img.width - sw) / 2;
+        sy = 0;
+      } else {
+        // Daha uzun — dikeyi kırp
+        sw = img.width;
+        sh = img.width / dstRatio;
+        sx = 0;
+        sy = (img.height - sh) / 2;
+      }
+
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_W, TARGET_H);
+      const dataUrl = canvas.toDataURL('image/png');
+
+      // Kart oluştur
+      const idx = results.length;
+      results.push({ name: file.name.replace(/\.[^.]+$/, '') + '_resized.png', dataUrl });
+
+      const card = document.createElement('div');
+      card.className = 'result-card';
+      card.innerHTML = `
+        <img src="${dataUrl}" alt="">
+        <div class="result-info">
+          <div class="result-name">${results[idx].name}</div>
+          <div class="result-size">Orijinal: ${img.width}×${img.height} → Hedef: ${TARGET_W}×${TARGET_H}</div>
+          <div class="result-badge">✓ App Store uyumlu</div>
+        </div>
+        <button class="download-btn" onclick="downloadOne(${idx})">İndir</button>
+      `;
+      resultsEl.appendChild(card);
+
+      // Tümünü indir butonu
+      updateDownloadAll();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function downloadOne(idx) {
+  const { name, dataUrl } = results[idx];
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = name;
+  a.click();
+}
+
+function updateDownloadAll() {
+  let btn = document.getElementById('downloadAllBtn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'downloadAllBtn';
+    btn.className = 'download-all-btn';
+    btn.textContent = `📦 Tümünü ZIP olarak İndir (${results.length} ekran)`;
+    btn.onclick = downloadAll;
+    resultsEl.appendChild(btn);
+  } else {
+    btn.textContent = `📦 Tümünü ZIP olarak İndir (${results.length} ekran)`;
+  }
+}
+
+async function downloadAll() {
+  const btn = document.getElementById('downloadAllBtn');
+  btn.textContent = '⏳ ZIP hazırlanıyor...';
+  btn.disabled = true;
+
+  const zip = new JSZip();
+  const folder = zip.folder('pisp_screenshots_1284x2778');
+
+  results.forEach(({ name, dataUrl }) => {
+    const base64 = dataUrl.split(',')[1];
+    folder.file(name, base64, { base64: true });
+  });
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pisp_screenshots_1284x2778.zip';
+  a.click();
+  URL.revokeObjectURL(url);
+
+  btn.textContent = `✅ İndirildi! (${results.length} ekran)`;
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>

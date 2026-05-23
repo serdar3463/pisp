@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PISP — Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="inner">
+    <div class="brand">
+      <div class="brand-mark">P</div>
+      <span class="brand-name">PISP</span>
+      <span class="brand-tag">Şirket Portalı</span>
+    </div>
+    <div class="flex items-center gap-sm">
+      <span id="company-name" class="text-sm text-secondary"></span>
+      <button class="btn btn-secondary btn-sm" onclick="logout()">Çıkış</button>
+    </div>
+  </div>
+</nav>
+
+<div class="page" style="padding-top:32px; padding-bottom:60px;">
+
+  <!-- Stats -->
+  <div class="stats-grid mb-md" id="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Token Bakiyesi</div>
+      <div class="stat-value" id="stat-balance">—</div>
+      <div class="stat-sub" id="stat-balance-try">— ₺ değerinde</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Aktif Teklifler</div>
+      <div class="stat-value" id="stat-offers">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Toplam Kabul</div>
+      <div class="stat-value" id="stat-acceptances">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Harcanan Bütçe</div>
+      <div class="stat-value" id="stat-spent">—</div>
+      <div class="stat-sub">token</div>
+    </div>
+  </div>
+
+  <div class="tabs mt-lg">
+    <div class="tab active" onclick="showSection('offers', this)">Tekliflerim</div>
+    <div class="tab" onclick="showSection('create', this)">Yeni Teklif</div>
+    <div class="tab" onclick="showSection('buy', this)">Token Satın Al</div>
+    <div class="tab" onclick="showSection('payments', this)">Ödeme Geçmişi</div>
+  </div>
+
+  <!-- ── Tekliflerim ──────────────────────────────── -->
+  <section id="section-offers">
+    <p class="eyebrow">Mevcut Teklifler</p>
+    <div id="offers-empty" class="card text-center hidden" style="padding:40px;">
+      <p style="font-size:32px; margin-bottom:12px;">📭</p>
+      <p class="fw-bold mb-md">Henüz teklif yok</p>
+      <p class="text-secondary text-sm">Yeni Teklif sekmesinden ilk teklifinizi oluşturun.</p>
+    </div>
+    <div class="card" id="offers-table-wrap" style="padding:0; overflow:auto;">
+      <table class="offers-table" id="offers-table">
+        <thead>
+          <tr>
+            <th>Teklif</th><th>Kategori</th><th>Ödül</th><th>Bütçe</th><th>Süre</th><th>Durum</th><th>QR</th>
+          </tr>
+        </thead>
+        <tbody id="offers-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Yeni Teklif ──────────────────────────────── -->
+  <section id="section-create" class="hidden">
+    <p class="eyebrow">Yeni Teklif Oluştur</p>
+    <div class="card flex-col gap-md">
+      <div id="create-error" class="alert alert-error"></div>
+      <div id="create-success" class="alert alert-success"></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div class="form-group">
+          <label>Teklif Başlığı</label>
+          <input id="c-title" placeholder="Yazılım Geliştirici Profili" />
+        </div>
+        <div class="form-group">
+          <label>Kategori</label>
+          <select id="c-category">
+            <option value="İK">İK</option>
+            <option value="Sağlık">Sağlık</option>
+            <option value="Finans">Finans</option>
+            <option value="Araştırma">Araştırma</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Açıklama</label>
+        <input id="c-desc" placeholder="Kullanıcıya gösterilecek kısa açıklama" />
+      </div>
+      <div class="form-group">
+        <label>İkon (emoji)</label>
+        <input id="c-logo" placeholder="🏢" maxlength="4" style="width:80px;" />
+      </div>
+      <div class="form-group">
+        <label>İstenen Alan ID'leri <span class="text-tertiary">(virgülle ayır)</span></label>
+        <input id="c-fields" placeholder="fullName, email, role, skills" />
+        <span class="form-hint">Kullanılabilir alanlar: fullName, email, birthDate, city, role, skills, education, occupation, taxId, linkedIn, phoneNumber, bloodType, allergies, monthlyIncome, employmentStatus</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px;">
+        <div class="form-group">
+          <label>Kabul Başına Ödül (💎)</label>
+          <input id="c-reward" type="number" min="1" placeholder="50" />
+        </div>
+        <div class="form-group">
+          <label>Toplam Bütçe (💎)</label>
+          <input id="c-budget" type="number" min="1" placeholder="1000" />
+          <span class="form-hint" id="budget-hint"></span>
+        </div>
+        <div class="form-group">
+          <label>Süre (saat)</label>
+          <input id="c-hours" type="number" min="1" placeholder="72" />
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="createOffer()">Teklif Oluştur ve QR Oluştur</button>
+    </div>
+  </section>
+
+  <!-- ── Token Satın Al ───────────────────────────── -->
+  <section id="section-buy" class="hidden">
+    <p class="eyebrow">Token Paketi Seç</p>
+    <div class="packages-grid mb-md" id="packages-grid"></div>
+
+    <div class="card flex-col gap-md" id="payment-form">
+      <h2 style="font-size:16px; font-weight:700;">Kart Bilgileri</h2>
+      <div id="pay-error" class="alert alert-error"></div>
+      <div class="form-group">
+        <label>Kart Sahibi Adı</label>
+        <input id="p-name" placeholder="AD SOYAD" style="text-transform:uppercase;" />
+      </div>
+      <div class="form-group">
+        <label>Kart Numarası</label>
+        <input id="p-card" placeholder="0000 0000 0000 0000" maxlength="19" oninput="formatCard(this)" />
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px;">
+        <div class="form-group">
+          <label>Son Kullanma Ay</label>
+          <input id="p-month" placeholder="MM" maxlength="2" />
+        </div>
+        <div class="form-group">
+          <label>Son Kullanma Yıl</label>
+          <input id="p-year" placeholder="YY" maxlength="2" />
+        </div>
+        <div class="form-group">
+          <label>CVV</label>
+          <input id="p-cvc" placeholder="000" maxlength="3" type="password" />
+        </div>
+      </div>
+      <button class="btn btn-primary" id="pay-btn" onclick="pay()" disabled>Paket Seçin</button>
+      <p class="text-xs text-tertiary text-center">Ödeme iyzico altyapısı ile güvenle işlenir. Kart bilgileri saklanmaz.</p>
+    </div>
+  </section>
+
+  <!-- ── Ödeme Geçmişi ────────────────────────────── -->
+  <section id="section-payments" class="hidden">
+    <p class="eyebrow">Ödeme Geçmişi</p>
+    <div class="card" style="padding:0; overflow:auto;">
+      <table class="offers-table">
+        <thead><tr><th>Tarih</th><th>Paket</th><th>Token</th><th>Tutar</th><th>Durum</th></tr></thead>
+        <tbody id="payments-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<!-- QR Modal -->
+<div class="modal-backdrop hidden" id="qr-modal">
+  <div class="modal">
+    <h2>QR Kodu</h2>
+    <p>Bu QR kodu kullanıcılara gösterin. PISP uygulamasıyla okutarak teklifi kabul edebilirler.</p>
+    <canvas id="qr-canvas"></canvas>
+    <div style="display:flex; gap:12px; justify-content:center;">
+      <button class="btn btn-secondary btn-sm" onclick="downloadQR()">İndir</button>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('qr-modal').classList.add('hidden')">Kapat</button>
+    </div>
+  </div>
+</div>
+
+<script src="api.js"></script>
+<script>
+  const TOKEN_TRY_RATE = 0.10;
+  let selectedPackage = null;
+  let currentQRData = null;
+
+  // Auth guard
+  if (!localStorage.getItem("pisp_token")) location.href = "/";
+  const company = JSON.parse(localStorage.getItem("pisp_company") || "{}");
+  document.getElementById("company-name").textContent = company.name || "";
+
+  async function loadDashboard() {
+    try {
+      const data = await api.get("/api/companies/me");
+      // Update company info
+      localStorage.setItem("pisp_company", JSON.stringify(data.company));
+      document.getElementById("company-name").textContent = data.company.name;
+
+      // Stats
+      document.getElementById("stat-balance").textContent = data.company.tokenBalance + " 💎";
+      document.getElementById("stat-balance-try").textContent = "≈ " + (data.company.tokenBalance * TOKEN_TRY_RATE).toFixed(2) + " ₺ değerinde";
+      document.getElementById("stat-offers").textContent = (data.offers || []).filter(o => o.active).length;
+      document.getElementById("stat-acceptances").textContent = data.stats?.total_acceptances ?? 0;
+      document.getElementById("stat-spent").textContent = data.stats?.total_spent ?? 0;
+
+      // Offers
+      renderOffers(data.offers || []);
+    } catch (e) {
+      if (e.status === 401) logout();
+    }
+  }
+
+  function renderOffers(offers) {
+    const tbody = document.getElementById("offers-tbody");
+    const empty = document.getElementById("offers-empty");
+    const wrap = document.getElementById("offers-table-wrap");
+    if (!offers.length) { empty.classList.remove("hidden"); wrap.classList.add("hidden"); return; }
+    empty.classList.add("hidden"); wrap.classList.remove("hidden");
+    tbody.innerHTML = offers.map(o => `
+      <tr>
+        <td><strong>${o.logo} ${o.title}</strong><br><span class="text-tertiary text-xs">${o.description}</span></td>
+        <td><span class="badge badge-${o.category === 'İK' ? 'ik' : o.category === 'Sağlık' ? 'saglik' : o.category === 'Finans' ? 'finans' : 'arastirma'}">${o.category}</span></td>
+        <td><strong>${o.reward} 💎</strong></td>
+        <td>${o.spent_budget}/${o.total_budget} 💎<br><span class="text-tertiary text-xs">${Math.round(o.spent_budget/o.total_budget*100)}% kullanıldı</span></td>
+        <td class="text-xs text-secondary">${new Date(o.expires_at).toLocaleDateString('tr-TR')}</td>
+        <td><span class="badge ${o.active ? 'badge-active' : 'badge-inactive'}">${o.active ? '● Aktif' : '○ Pasif'}</span></td>
+        <td><button class="btn btn-secondary btn-sm" onclick='showQR(${JSON.stringify(o)})'>QR Göster</button></td>
+      </tr>
+    `).join("");
+  }
+
+  async function createOffer() {
+    const title = document.getElementById("c-title").value.trim();
+    const category = document.getElementById("c-category").value;
+    const description = document.getElementById("c-desc").value.trim();
+    const logo = document.getElementById("c-logo").value.trim() || "🏢";
+    const fieldIds = document.getElementById("c-fields").value.split(",").map(s => s.trim()).filter(Boolean);
+    const reward = parseInt(document.getElementById("c-reward").value);
+    const totalBudget = parseInt(document.getElementById("c-budget").value);
+    const expiresInHours = parseInt(document.getElementById("c-hours").value);
+    const errEl = document.getElementById("create-error");
+    const okEl = document.getElementById("create-success");
+    errEl.classList.remove("show"); okEl.classList.remove("show");
+
+    try {
+      const data = await api.post("/api/offers", { title, category, description, logo, fieldIds, reward, totalBudget, expiresInHours });
+      okEl.textContent = "Teklif oluşturuldu! QR kodu indirin.";
+      okEl.classList.add("show");
+      showQRFromPayload(data.qrPayload);
+      loadDashboard();
+    } catch(e) { errEl.textContent = e.message; errEl.classList.add("show"); }
+  }
+
+  async function loadPackages() {
+    const data = await api.get("/api/offers/packages");
+    const grid = document.getElementById("packages-grid");
+    grid.innerHTML = data.packages.map((p, i) => `
+      <div class="pkg-card" onclick="selectPackage('${p.id}', this, ${p.tokens}, ${p.price_try})">
+        ${i === 1 ? '<span class="pkg-popular">EN POPÜLER</span><br>' : ''}
+        <div class="tokens">${p.tokens.toLocaleString()} 💎</div>
+        <div class="pkg-label">${p.label} Paketi</div>
+        <div class="price">${p.price_try.toFixed(0)} ₺</div>
+        <div class="rate">${p.price_per_token.toFixed(2)} ₺/token</div>
+      </div>
+    `).join("");
+  }
+
+  function selectPackage(id, el, tokens, price) {
+    document.querySelectorAll(".pkg-card").forEach(c => c.classList.remove("selected"));
+    el.classList.add("selected");
+    selectedPackage = { id, tokens, price };
+    const btn = document.getElementById("pay-btn");
+    btn.textContent = `${tokens.toLocaleString()} 💎 Satın Al — ${price.toFixed(0)} ₺`;
+    btn.disabled = false;
+  }
+
+  async function pay() {
+    if (!selectedPackage) return;
+    const name = document.getElementById("p-name").value.trim();
+    const cardNumber = document.getElementById("p-card").value.replace(/\s/g, "");
+    const expireMonth = document.getElementById("p-month").value.trim();
+    const expireYear = document.getElementById("p-year").value.trim();
+    const cvc = document.getElementById("p-cvc").value.trim();
+    const errEl = document.getElementById("pay-error");
+    errEl.classList.remove("show");
+    if (!name || cardNumber.length < 16 || !expireMonth || !expireYear || !cvc) {
+      errEl.textContent = "Tüm kart bilgilerini eksiksiz girin.";
+      errEl.classList.add("show"); return;
+    }
+    try {
+      const data = await api.post("/api/payments/initiate", {
+        packageId: selectedPackage.id, cardHolderName: name, cardNumber,
+        expireMonth, expireYear: "20" + expireYear, cvc,
+        ip: "85.34.78.112"
+      });
+      alert(`✅ Ödeme başarılı! ${data.tokens} 💎 hesabınıza eklendi. Yeni bakiye: ${data.newBalance} 💎`);
+      loadDashboard();
+      showSection("offers", document.querySelector(".tab"));
+    } catch(e) { errEl.textContent = e.message; errEl.classList.add("show"); }
+  }
+
+  async function loadPayments() {
+    const data = await api.get("/api/payments/history");
+    const tbody = document.getElementById("payments-tbody");
+    if (!data.payments.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-secondary" style="padding:24px;">Henüz ödeme yok</td></tr>'; return; }
+    tbody.innerHTML = data.payments.map(p => `
+      <tr>
+        <td class="text-sm">${new Date(p.created_at).toLocaleDateString("tr-TR")}</td>
+        <td>${p.package_label}</td>
+        <td class="fw-bold">${p.tokens.toLocaleString()} 💎</td>
+        <td>${p.price_try.toFixed(2)} ₺</td>
+        <td><span class="badge ${p.status === 'completed' ? 'badge-active' : 'badge-inactive'}">${p.status === 'completed' ? '✓ Tamamlandı' : p.status}</span></td>
+      </tr>
+    `).join("");
+  }
+
+  function showSection(id, el) {
+    document.querySelectorAll("section").forEach(s => s.classList.add("hidden"));
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.getElementById("section-" + id).classList.remove("hidden");
+    if (el) el.classList.add("active");
+    if (id === "buy") loadPackages();
+    if (id === "payments") loadPayments();
+  }
+
+  function showQR(offer) {
+    const qrPayload = {
+      protocol: "pisp.offer.v1",
+      id: offer.id, company: company.name, logo: offer.logo,
+      category: offer.category, description: offer.description,
+      fieldIds: JSON.parse(offer.field_ids || "[]"),
+      reward: offer.reward, expiresInHours: 72
+    };
+    showQRFromPayload(qrPayload);
+  }
+
+  function showQRFromPayload(payload) {
+    currentQRData = JSON.stringify(payload);
+    document.getElementById("qr-modal").classList.remove("hidden");
+    QRCode.toCanvas(document.getElementById("qr-canvas"), currentQRData, { width: 260, margin: 2, color: { dark: "#000", light: "#fff" } });
+  }
+
+  function downloadQR() {
+    const canvas = document.getElementById("qr-canvas");
+    const a = document.createElement("a"); a.download = "pisp-offer-qr.png"; a.href = canvas.toDataURL(); a.click();
+  }
+
+  function formatCard(input) {
+    input.value = input.value.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 ").slice(0, 19);
+  }
+
+  // Budget hint
+  document.addEventListener("DOMContentLoaded", () => {
+    ["c-reward", "c-budget"].forEach(id => {
+      document.getElementById(id)?.addEventListener("input", () => {
+        const r = parseInt(document.getElementById("c-reward").value) || 0;
+        const b = parseInt(document.getElementById("c-budget").value) || 0;
+        const slots = r > 0 ? Math.floor(b / r) : 0;
+        document.getElementById("budget-hint").textContent = slots ? `${slots} kullanıcı kabul edebilir` : "";
+      });
+    });
+  });
+
+  function logout() {
+    localStorage.clear();
+    location.href = "/";
+  }
+
+  loadDashboard();
+</script>
+</body>
+</html>
