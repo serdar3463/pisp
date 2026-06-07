@@ -2,7 +2,7 @@
   "expo": {
     "name": "PISP",
     "slug": "pisp-mobile",
-    "version": "1.0.0",
+    "version": "1.0.5",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,

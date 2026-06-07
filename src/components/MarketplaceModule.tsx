@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { BarcodeScanningResult, CameraView, useCameraPermissions } from "expo-camera";
 
@@ -14,6 +14,7 @@ import {
 } from "../data/marketplace";
 import { allFields, VaultValues } from "../data/pisp";
 import { getOrCreateDeviceIdentity } from "../services/deviceIdentity";
+import { pispApi } from "../services/pispApi";
 import { colors, radius, spacing, typography } from "../theme";
 import { Card, Section } from "./ui";
 
@@ -38,9 +39,46 @@ type TokenQRPayload = {
   shortId: string;
 };
 
+type TokenPackage = {
+  sku: string;
+  label: string;
+  tokens: number;
+  fallbackPrice: string;
+  popular?: boolean;
+  bonus?: string;
+};
+
 const CATEGORY_FILTERS = ["Tümü", "İK", "Sağlık", "Finans", "Araştırma"] as const;
 
-const REDEEM_URL = "https://pisp.app/odemeler";
+const TOKEN_PACKAGES: TokenPackage[] = [
+  { sku: "com.pisp.mobile.tokens.100",  label: "Başlangıç",   tokens: 100,  fallbackPrice: "₺15,00" },
+  { sku: "com.pisp.mobile.tokens.300",  label: "Popüler",     tokens: 300,  fallbackPrice: "₺40,00", popular: true, bonus: "%11 avantaj" },
+  { sku: "com.pisp.mobile.tokens.500",  label: "Avantajlı",   tokens: 500,  fallbackPrice: "₺60,00", bonus: "%20 avantaj" },
+  { sku: "com.pisp.mobile.tokens.1000", label: "Süper Değer", tokens: 1000, fallbackPrice: "₺110,00", bonus: "%27 avantaj" },
+];
+
+const FAQ_ITEMS = [
+  {
+    q: "Verilerim kimin elinde?",
+    a: "Verileriniz yalnızca kendi cihazınızda, AES-256 şifreli olarak saklanır. PISP sunucularına asla gönderilmez. Veri paylaşım QR kodu bile doğrudan cihazınızda oluşturulur — araya giren sunucu yoktur.",
+  },
+  {
+    q: "Token nasıl kazanırım?",
+    a: "Şirket temsilcisinin gösterdiği PISP QR kodunu 'Teklif Tara' ile okutun. Hangi bilgilerin istendiğini ve karşılığında ne kadar token kazanacağınızı görürsünüz. Onayladığınızda token bakiyeniz anında artar.",
+  },
+  {
+    q: "Token'ları nakde ne zaman çevirebilirim?",
+    a: `Minimum ${MIN_WITHDRAWAL_TOKENS} 💎 bakiyeye ulaştığınızda pisp.app/odemeler adresinden IBAN'ınıza çekim yapabilirsiniz. İşlemler genellikle 1–3 iş günü içinde hesabınıza geçer. %10 işlem ücreti uygulanır.`,
+  },
+  {
+    q: "Hangi bilgilerimi paylaşacağım?",
+    a: "Her teklif, talep ettiği alanları açıkça listeler. Kasanızda bulunmayan bilgiler paylaşılamaz. Her adımda onay veya reddetme hakkınız saklıdır — PISP hiçbir zaman zorla paylaşım yapmaz.",
+  },
+  {
+    q: "Ödeme yaptıktan sonra token ne zaman gelir?",
+    a: "Ödeme onaylandıktan sonra tokenlar saniyeler içinde bakiyenize yansır. Kart bilgileriniz güvenli şekilde Iyzico altyapısı üzerinden işlenir, PISP sunucularında saklanmaz.",
+  },
+];
 
 const SAMPLE_OFFERS: CompanyOfferQR[] = [
   {
@@ -89,10 +127,16 @@ const SAMPLE_OFFERS: CompanyOfferQR[] = [
   },
 ];
 
+
 export function MarketplaceModule(props: Props) {
   const [activeFilter, setActiveFilter] = useState<string>("Tümü");
   const [showReceiveQR, setShowReceiveQR] = useState(false);
-  const [showRedemption, setShowRedemption] = useState(false);
+  const [withdrawStep, setWithdrawStep] = useState<0 | 1 | 2 | 3>(0);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawIBAN, setWithdrawIBAN] = useState("");
+  const [withdrawHolder, setWithdrawHolder] = useState("");
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  const [withdrawRequestId, setWithdrawRequestId] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanningOffer, setScanningOffer] = useState(false);
   const [pendingOffer, setPendingOffer] = useState<MarketplaceOffer | null>(null);
@@ -102,6 +146,20 @@ export function MarketplaceModule(props: Props) {
   const [deviceShortId, setDeviceShortId] = useState("——");
   const [sortByReward, setSortByReward] = useState(true);
   const [permission, requestPermission] = useCameraPermissions();
+
+  // Payment state
+  const [showBuyTokens, setShowBuyTokens] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<TokenPackage | null>(null);
+  const [showCardForm, setShowCardForm] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [cardHolder, setCardHolder] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardMonth, setCardMonth] = useState("");
+  const [cardYear, setCardYear] = useState("");
+  const [cardCvc, setCardCvc] = useState("");
+
+  // FAQ accordion state
+  const [faqOpen, setFaqOpen] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     getOrCreateDeviceIdentity()
@@ -205,6 +263,68 @@ export function MarketplaceModule(props: Props) {
     );
   }
 
+  const SKU_TO_PACKAGE_ID: Record<string, string> = {
+    "com.pisp.mobile.tokens.100": "pkg_100",
+    "com.pisp.mobile.tokens.300": "pkg_300",
+    "com.pisp.mobile.tokens.500": "pkg_500",
+    "com.pisp.mobile.tokens.1000": "pkg_1000",
+  };
+
+  function closeBuyModal() {
+    setShowBuyTokens(false);
+    setSelectedPackage(null);
+  }
+
+  function closeCardForm() {
+    setShowCardForm(false);
+    setSelectedPackage(null);
+    setCardHolder("");
+    setCardNumber("");
+    setCardMonth("");
+    setCardYear("");
+    setCardCvc("");
+  }
+
+  function selectPackageForPayment(pkg: TokenPackage) {
+    setSelectedPackage(pkg);
+    setShowBuyTokens(false);
+    setShowCardForm(true);
+  }
+
+  async function handleCardPayment() {
+    if (!selectedPackage || paymentLoading) return;
+    if (!cardHolder.trim() || cardNumber.replace(/\s/g, "").length < 16 || !cardMonth || !cardYear || cardCvc.length < 3) {
+      Alert.alert("Eksik Bilgi", "Lütfen tüm kart bilgilerini eksiksiz girin.");
+      return;
+    }
+    setPaymentLoading(true);
+    try {
+      const identity = await getOrCreateDeviceIdentity();
+      const result = await pispApi.purchaseTokens(
+        identity.did,
+        SKU_TO_PACKAGE_ID[selectedPackage.sku] ?? "",
+        {
+          cardHolderName: cardHolder.trim(),
+          cardNumber: cardNumber.replace(/\s/g, ""),
+          expireMonth: cardMonth,
+          expireYear: cardYear,
+          cvc: cardCvc,
+        }
+      );
+      props.onReceiveTokens(result.tokens, `${selectedPackage.label} paketi satın alındı`);
+      closeCardForm();
+      setShowBuyTokens(false);
+    } catch (e) {
+      Alert.alert("Ödeme Hatası", (e as Error).message || "Ödeme işlemi başarısız. Kart bilgilerinizi kontrol edip tekrar deneyin.");
+    } finally {
+      setPaymentLoading(false);
+    }
+  }
+
+  function toggleFaq(q: string) {
+    setFaqOpen((prev) => ({ ...prev, [q]: !prev[q] }));
+  }
+
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
 
@@ -251,10 +371,13 @@ export function MarketplaceModule(props: Props) {
           }}>
             <Text style={styles.walletBtnText}>📤 Gönder</Text>
           </Pressable>
-          <Pressable style={[styles.walletBtn, styles.redeemBtn]} onPress={() => setShowRedemption(true)}>
+          <Pressable style={[styles.walletBtn, styles.redeemBtn]} onPress={() => setWithdrawStep(1)}>
             <Text style={styles.walletBtnText}>💳 Çevir</Text>
           </Pressable>
         </View>
+        <Pressable style={styles.buyTokensBtn} onPress={() => setShowBuyTokens(true)}>
+          <Text style={styles.buyTokensBtnText}>+ Token Satın Al</Text>
+        </Pressable>
         <Text style={styles.rateNote}>1 💎 = {TOKEN_TRY_RATE.toFixed(2)} ₺ · Nakde çevirim: pisp.app/odemeler</Text>
       </View>
 
@@ -304,7 +427,7 @@ export function MarketplaceModule(props: Props) {
               </Text>
               <View style={styles.howSteps}>
                 <Text style={styles.howStep}>1 · Şirketten QR kodu iste</Text>
-                <Text style={styles.howStep}>2 · "Teklif Tara" ile okut</Text>
+                <Text style={styles.howStep}>{'2 · "Teklif Tara" ile okut'}</Text>
                 <Text style={styles.howStep}>3 · Bilgileri onayla → puan kazan</Text>
               </View>
               <Text style={styles.sampleLabel}>Örnek teklifler</Text>
@@ -328,6 +451,103 @@ export function MarketplaceModule(props: Props) {
           <OfferCard key={offer.id} offer={offer} onAccept={() => setPendingOffer(offer)} />
         ))
       )}
+
+      {/* ── Eğitim Rehberi ───────────────────────── */}
+      <Section title="Nasıl Çalışır?" eyebrow="REHBER" />
+
+      <View style={styles.stepsCard}>
+        <StepRow n={1} icon="🔐" title="Kasanı doldur" desc="Ad, e-posta, meslek, sağlık bilgileri... Kasanda ne kadar çok bilgi olursa sana uygun o kadar çok teklif gelir." />
+        <StepRow n={2} icon="📷" title="Teklif QR'ını tara" desc={'Şirket temsilcisi PISP QR kodunu gösterdiğinde "Teklif Tara" butonuna bas ve kamerana göster.'} />
+        <StepRow n={3} icon="👁" title="İncele ve karar ver" desc="Hangi bilgiler isteniyor, karşılığında kaç token kazanacaksın — hepsini görürsün. İstersen reddedebilirsin." last={false} />
+        <StepRow n={4} icon="💎" title="Token kazan" desc={`Onayladığın her paylaşım için belirlenen token anında bakiyene eklenir. 1 💎 = ${TOKEN_TRY_RATE.toFixed(2)} ₺`} />
+        <StepRow n={5} icon="💳" title="Nakde çevir" desc={`${MIN_WITHDRAWAL_TOKENS} 💎 ve üzerinde bakiyeni IBAN'ına çekebilirsin. pisp.app/odemeler üzerinden talep oluştur.`} last />
+      </View>
+
+      {/* ── Gizlilik Güvenceleri ─────────────────── */}
+      <View style={styles.privacyCard}>
+        <Text style={styles.privacyTitle}>🔒 Gizlilik Güvenceleri</Text>
+        <View style={styles.privacyGrid}>
+          {[
+            "Kişisel veriler asla sunucuya gönderilmez",
+            "AES-256 şifreleme — yalnızca cihazınızda",
+            "Her paylaşımda açık onayınız gerekir",
+            "İstediğiniz zaman reddedebilirsiniz",
+            "KVKK ve GDPR uyumlu",
+            "Face ID / Touch ID ile kilit",
+          ].map((item) => (
+            <View key={item} style={styles.privacyItem}>
+              <Text style={styles.privacyCheck}>✓</Text>
+              <Text style={styles.privacyItemText}>{item}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* ── Token Kazanç Örnekleri ───────────────── */}
+      <View style={styles.earningsCard}>
+        <Text style={styles.earningsTitle}>💡 Ne Kadar Kazanabilirsin?</Text>
+        <Text style={styles.earningsSubtitle}>Örnek teklifler ve kazanç değerleri</Text>
+        {[
+          { icon: "📊", label: "Anket & Araştırma",      tokens: 20,  category: "Araştırma" },
+          { icon: "💼", label: "İK / İşe Alım Profili",  tokens: 30,  category: "İK" },
+          { icon: "🏥", label: "Sigorta Sağlık Profili", tokens: 60,  category: "Sağlık" },
+          { icon: "🏦", label: "Finans / Kredi Profili", tokens: 100, category: "Finans" },
+        ].map((row) => (
+          <View key={row.label} style={styles.earningsRow}>
+            <Text style={styles.earningsIcon}>{row.icon}</Text>
+            <View style={styles.flex}>
+              <Text style={styles.earningsLabel}>{row.label}</Text>
+              <Text style={styles.earningsCategory}>{row.category}</Text>
+            </View>
+            <View style={styles.earningsReward}>
+              <Text style={styles.earningsToken}>+{row.tokens} 💎</Text>
+              <Text style={styles.earningsTL}>≈ {(row.tokens * TOKEN_TRY_RATE).toFixed(2)} ₺</Text>
+            </View>
+          </View>
+        ))}
+        <View style={styles.earningsTotalRow}>
+          <Text style={styles.earningsTotalLabel}>Tüm teklifleri kabul edersen</Text>
+          <Text style={styles.earningsTotalValue}>210 💎 · ≈ 31.50 ₺</Text>
+        </View>
+      </View>
+
+      {/* ── Token Hesaplayıcı ────────────────────── */}
+      <View style={styles.calcCard}>
+        <Text style={styles.earningsTitle}>🧮 Kazanç Hesaplayıcı</Text>
+        <Text style={styles.earningsSubtitle}>Kasanı ne kadar doldurursan o kadar çok kazan</Text>
+        {[
+          { label: "Yalnızca temel bilgiler (ad, e-posta)", pct: 20, est: 40 },
+          { label: "Kişisel + meslek bilgileri", pct: 50, est: 180 },
+          { label: "Tam profil (sağlık dahil)", pct: 85, est: 420 },
+          { label: "Tüm alanlar dolu", pct: 100, est: 600 },
+        ].map((row) => (
+          <View key={row.label} style={styles.calcRow}>
+            <View style={styles.flex}>
+              <Text style={styles.calcLabel}>{row.label}</Text>
+              <View style={styles.calcBarBg}>
+                <View style={[styles.calcBarFill, { width: `${row.pct}%` }]} />
+              </View>
+            </View>
+            <View style={styles.calcReward}>
+              <Text style={styles.calcTokens}>~{row.est} 💎</Text>
+              <Text style={styles.calcTL}>≈ {(row.est * TOKEN_TRY_RATE).toFixed(0)} ₺</Text>
+            </View>
+          </View>
+        ))}
+        <Text style={styles.calcNote}>* Aylık tahmin, teklife göre değişir</Text>
+      </View>
+
+      {/* ── Sıkça Sorulan Sorular ───────────────── */}
+      <Section title="Sıkça Sorulan Sorular" eyebrow="SSS" />
+      {FAQ_ITEMS.map((item) => (
+        <FAQItem
+          key={item.q}
+          question={item.q}
+          answer={item.a}
+          open={!!faqOpen[item.q]}
+          onToggle={() => toggleFaq(item.q)}
+        />
+      ))}
 
       {/* ── Token Kullan ─────────────────────────── */}
       <Section title="Özellik Kilidi Aç" eyebrow="PUANLARINI KULLAN" />
@@ -547,50 +767,348 @@ export function MarketplaceModule(props: Props) {
         </View>
       </Modal>
 
-      {/* ── Nakde Çevirme Bilgi Modalı ───────────── */}
-      <Modal visible={showRedemption} transparent animationType="slide">
+      {/* ── Nakde Çevirme (Binance-style) ──────── */}
+      <Modal visible={withdrawStep > 0} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.overlay}>
+          <View style={[styles.sheet, { maxHeight: "88%" }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+
+              {/* Header */}
+              <View style={styles.buyHeader}>
+                <Text style={styles.sheetTitle}>
+                  {withdrawStep === 1 ? "💳 Çekim Miktarı" : withdrawStep === 2 ? "🏦 Hesap Bilgileri" : "✅ Talep Alındı"}
+                </Text>
+                {withdrawStep < 3 && (
+                  <Pressable onPress={() => { setWithdrawStep(0); setWithdrawAmount(""); setWithdrawIBAN(""); setWithdrawHolder(""); }} hitSlop={12}>
+                    <Text style={styles.buyCloseX}>✕</Text>
+                  </Pressable>
+                )}
+              </View>
+
+              {/* Progress dots */}
+              <View style={styles.withdrawProgress}>
+                {[1, 2, 3].map((s) => (
+                  <View key={s} style={[styles.withdrawDot, withdrawStep >= s && styles.withdrawDotActive]} />
+                ))}
+              </View>
+
+              {/* Step 1: Amount */}
+              {withdrawStep === 1 && (
+                <View style={styles.withdrawBody}>
+                  <View style={styles.withdrawBalanceCard}>
+                    <Text style={styles.withdrawBalanceLabel}>Mevcut Bakiye</Text>
+                    <Text style={styles.withdrawBalanceValue}>{props.tokenBalance} 💎</Text>
+                    <Text style={styles.withdrawBalanceTL}>≈ {balanceTL} ₺</Text>
+                  </View>
+
+                  <Text style={styles.inputLabel}>Çekmek istediğiniz token miktarı</Text>
+                  <TextInput
+                    style={styles.cardInput}
+                    value={withdrawAmount}
+                    onChangeText={setWithdrawAmount}
+                    keyboardType="number-pad"
+                    placeholder={`Min. ${MIN_WITHDRAWAL_TOKENS} 💎`}
+                    placeholderTextColor={colors.textTertiary}
+                  />
+                  {withdrawAmount && !isNaN(Number(withdrawAmount)) && Number(withdrawAmount) > 0 && (
+                    <View style={styles.orderSummary}>
+                      <View style={styles.redeemRow}>
+                        <Text style={styles.redeemLabel}>Çekilecek tutar</Text>
+                        <Text style={styles.redeemValue}>{withdrawAmount} 💎</Text>
+                      </View>
+                      <View style={styles.redeemRow}>
+                        <Text style={styles.redeemLabel}>Tahmini TL</Text>
+                        <Text style={[styles.redeemValue, { color: colors.success }]}>
+                          ≈ {(Number(withdrawAmount) * TOKEN_TRY_RATE).toFixed(2)} ₺
+                        </Text>
+                      </View>
+                      <View style={styles.redeemRow}>
+                        <Text style={styles.redeemLabel}>Kalan bakiye</Text>
+                        <Text style={styles.redeemValue}>{props.tokenBalance - Number(withdrawAmount)} 💎</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  <Text style={styles.secureNote}>Minimum çekim: {MIN_WITHDRAWAL_TOKENS} 💎 · 1 💎 = {TOKEN_TRY_RATE.toFixed(2)} ₺</Text>
+
+                  <Pressable
+                    style={[styles.payBtn, { marginTop: spacing.lg }]}
+                    onPress={() => {
+                      const amt = Number(withdrawAmount);
+                      if (isNaN(amt) || amt < MIN_WITHDRAWAL_TOKENS) {
+                        Alert.alert("Geçersiz Miktar", `Minimum çekim miktarı ${MIN_WITHDRAWAL_TOKENS} 💎'dir.`);
+                        return;
+                      }
+                      if (amt > props.tokenBalance) {
+                        Alert.alert("Yetersiz Bakiye", `En fazla ${props.tokenBalance} 💎 çekebilirsiniz.`);
+                        return;
+                      }
+                      setWithdrawStep(2);
+                    }}
+                  >
+                    <Text style={styles.payBtnText}>Devam →</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* Step 2: IBAN */}
+              {withdrawStep === 2 && (
+                <View style={styles.withdrawBody}>
+                  <View style={styles.orderSummary}>
+                    <View style={styles.redeemRow}>
+                      <Text style={styles.redeemLabel}>Çekim miktarı</Text>
+                      <Text style={styles.redeemValue}>{withdrawAmount} 💎</Text>
+                    </View>
+                    <View style={styles.redeemRow}>
+                      <Text style={styles.redeemLabel}>Tahmini alacağınız</Text>
+                      <Text style={[styles.redeemValue, { color: colors.success }]}>
+                        ≈ {(Number(withdrawAmount) * TOKEN_TRY_RATE).toFixed(2)} ₺
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.inputLabel}>IBAN</Text>
+                  <TextInput
+                    style={styles.cardInput}
+                    value={withdrawIBAN}
+                    onChangeText={(t) => {
+                      const clean = t.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+                      const withTR = clean.startsWith("TR") ? clean : "TR" + clean.replace(/^TR/i, "");
+                      setWithdrawIBAN(withTR.slice(0, 26));
+                    }}
+                    placeholder="TR00 0000 0000 0000 0000 0000 00"
+                    placeholderTextColor={colors.textTertiary}
+                    autoCapitalize="characters"
+                    maxLength={26}
+                  />
+
+                  <Text style={styles.inputLabel}>Hesap Sahibi Ad Soyad</Text>
+                  <TextInput
+                    style={styles.cardInput}
+                    value={withdrawHolder}
+                    onChangeText={setWithdrawHolder}
+                    placeholder="AD SOYAD"
+                    placeholderTextColor={colors.textTertiary}
+                    autoCapitalize="words"
+                  />
+
+                  <Text style={styles.secureNote}>🔒 IBAN bilgileriniz şifreli iletilir ve yalnızca bu işlem için kullanılır</Text>
+
+                  <View style={styles.btnRow}>
+                    <Pressable style={[styles.closeBtn, { flex: 1 }]} onPress={() => setWithdrawStep(1)}>
+                      <Text style={styles.closeBtnText}>← Geri</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.payBtn, { flex: 2 }, withdrawLoading && styles.payBtnLoading]}
+                      disabled={withdrawLoading}
+                      onPress={async () => {
+                        const ibanClean = withdrawIBAN.replace(/\s/g, "");
+                        if (ibanClean.length !== 26) {
+                          Alert.alert("Geçersiz IBAN", "IBAN 26 karakter olmalıdır (TR dahil).");
+                          return;
+                        }
+                        if (!withdrawHolder.trim()) {
+                          Alert.alert("Eksik Bilgi", "Hesap sahibi adını giriniz.");
+                          return;
+                        }
+                        setWithdrawLoading(true);
+                        try {
+                          const identity = await getOrCreateDeviceIdentity();
+                          const result = await pispApi.requestWithdrawal(identity.did, Number(withdrawAmount));
+                          await pispApi.submitWithdrawalIban(result.requestId, ibanClean, withdrawHolder.trim());
+                          setWithdrawRequestId(result.requestId);
+                          props.onSendTokens(Number(withdrawAmount), "IBAN çekim talebi");
+                          setWithdrawStep(3);
+                        } catch (e) {
+                          Alert.alert("Hata", (e as Error).message ?? "Talep oluşturulamadı.");
+                        } finally {
+                          setWithdrawLoading(false);
+                        }
+                      }}
+                    >
+                      <Text style={styles.payBtnText}>{withdrawLoading ? "İşleniyor..." : "Çekim Talep Et"}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {/* Step 3: Success */}
+              {withdrawStep === 3 && (
+                <View style={[styles.withdrawBody, { alignItems: "center" }]}>
+                  <View style={styles.withdrawSuccessIcon}>
+                    <Text style={{ fontSize: 40 }}>✅</Text>
+                  </View>
+                  <Text style={styles.withdrawSuccessTitle}>Talebiniz Alındı</Text>
+                  <Text style={styles.withdrawSuccessDesc}>
+                    {withdrawAmount} 💎 çekim talebiniz başarıyla oluşturuldu. IBAN bilgileriniz kaydedildi.
+                  </Text>
+                  <View style={styles.orderSummary}>
+                    <View style={styles.redeemRow}>
+                      <Text style={styles.redeemLabel}>Talep No</Text>
+                      <Text style={[styles.redeemValue, { fontSize: 11 }]}>{withdrawRequestId.slice(0, 18)}...</Text>
+                    </View>
+                    <View style={styles.redeemRow}>
+                      <Text style={styles.redeemLabel}>Tahmini Süre</Text>
+                      <Text style={styles.redeemValue}>1–3 iş günü</Text>
+                    </View>
+                    <View style={styles.redeemRow}>
+                      <Text style={styles.redeemLabel}>Tahmini Tutar</Text>
+                      <Text style={[styles.redeemValue, { color: colors.success }]}>
+                        ≈ {(Number(withdrawAmount) * TOKEN_TRY_RATE).toFixed(2)} ₺
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.secureNote}>{"Ödeme IBAN'ınıza banka havalesi olarak yapılacaktır."}</Text>
+                  <Pressable
+                    style={[styles.payBtn, { width: "100%", marginTop: spacing.md }]}
+                    onPress={() => { setWithdrawStep(0); setWithdrawAmount(""); setWithdrawIBAN(""); setWithdrawHolder(""); setWithdrawRequestId(""); }}
+                  >
+                    <Text style={styles.payBtnText}>Tamam</Text>
+                  </Pressable>
+                </View>
+              )}
+
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Token Satın Al — Paket Seçimi ──────── */}
+      <Modal visible={showBuyTokens} transparent animationType="slide">
         <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>💳 Nakde Çevir</Text>
-
-            <View style={styles.redeemInfoCard}>
-              <View style={styles.redeemRow}>
-                <Text style={styles.redeemLabel}>Mevcut bakiyeniz</Text>
-                <Text style={styles.redeemValue}>{props.tokenBalance} 💎</Text>
-              </View>
-              <View style={styles.redeemRow}>
-                <Text style={styles.redeemLabel}>Tahmini değer</Text>
-                <Text style={[styles.redeemValue, { color: colors.success }]}>≈ {balanceTL} ₺</Text>
-              </View>
-              <View style={styles.redeemDivider} />
-              <View style={styles.redeemRow}>
-                <Text style={styles.redeemLabel}>Minimum çekim</Text>
-                <Text style={styles.redeemValue}>{MIN_WITHDRAWAL_TOKENS} 💎</Text>
-              </View>
-              <View style={styles.redeemRow}>
-                <Text style={styles.redeemLabel}>Dönüşüm kuru</Text>
-                <Text style={styles.redeemValue}>1 💎 = {TOKEN_TRY_RATE.toFixed(2)} ₺</Text>
-              </View>
-            </View>
-
-            <View style={styles.redeemWebCard}>
-              <Text style={styles.redeemWebTitle}>Nasıl nakde çevrilir?</Text>
-              <Text style={styles.redeemWebBody}>
-                Puanlarını Türk Lirası'na çevirmek için web sitemizi ziyaret et. Hesabını doğrulayıp IBAN'ını ekledikten sonra çekim talebini oluşturabilirsin.
-              </Text>
-              <Pressable
-                style={styles.redeemWebBtn}
-                onPress={() => void Linking.openURL(REDEEM_URL)}
-              >
-                <Text style={styles.redeemWebBtnText}>🌐 pisp.app/odemeler</Text>
+          <View style={[styles.sheet, styles.buySheet]}>
+            <View style={styles.buyHeader}>
+              <Text style={styles.sheetTitle}>Token Satın Al</Text>
+              <Pressable onPress={closeBuyModal} hitSlop={12}>
+                <Text style={styles.buyCloseX}>✕</Text>
               </Pressable>
             </View>
+            <Text style={styles.buySubtitle}>Paket seç — kart bilgilerini gir — tokenlar anında gelir.</Text>
 
-            <Pressable style={styles.closeBtn} onPress={() => setShowRedemption(false)}>
-              <Text style={styles.closeBtnText}>Kapat</Text>
-            </Pressable>
+            <View style={styles.packageGrid}>
+              {TOKEN_PACKAGES.map((pkg) => (
+                <Pressable
+                  key={pkg.sku}
+                  style={[styles.packageCard, pkg.popular && styles.packageCardPopular]}
+                  onPress={() => selectPackageForPayment(pkg)}
+                >
+                  {pkg.popular && <View style={styles.popularBadge}><Text style={styles.popularBadgeText}>Popüler</Text></View>}
+                  <Text style={styles.packageTokens}>{pkg.tokens} 💎</Text>
+                  <Text style={styles.packagePrice}>{pkg.fallbackPrice}</Text>
+                  {pkg.bonus && <Text style={styles.packageBonus}>{pkg.bonus}</Text>}
+                  <Text style={styles.packageLabel}>{pkg.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.secureNote}>🔒 Iyzico altyapısıyla güvenli ödeme · Kart bilgileri saklanmaz</Text>
           </View>
         </View>
+      </Modal>
+
+      {/* ── Kart Ödeme Formu ─────────────────────── */}
+      <Modal visible={showCardForm} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.overlay}>
+          <View style={[styles.sheet, { maxHeight: "90%" }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.buyHeader}>
+                <Text style={styles.sheetTitle}>Kart Bilgileri</Text>
+                <Pressable onPress={closeCardForm} hitSlop={12}>
+                  <Text style={styles.buyCloseX}>✕</Text>
+                </Pressable>
+              </View>
+
+              {selectedPackage && (
+                <View style={styles.orderSummary}>
+                  <View style={styles.redeemRow}>
+                    <Text style={styles.redeemLabel}>Paket</Text>
+                    <Text style={styles.redeemValue}>{selectedPackage.label} — {selectedPackage.tokens} 💎</Text>
+                  </View>
+                  <View style={styles.redeemRow}>
+                    <Text style={styles.redeemLabel}>Tutar</Text>
+                    <Text style={[styles.redeemValue, { color: colors.success }]}>{selectedPackage.fallbackPrice}</Text>
+                  </View>
+                </View>
+              )}
+
+              <Text style={styles.inputLabel}>Kart Sahibi Adı Soyadı</Text>
+              <TextInput
+                style={styles.cardInput}
+                value={cardHolder}
+                onChangeText={setCardHolder}
+                placeholder="AD SOYAD"
+                placeholderTextColor={colors.textTertiary}
+                autoCapitalize="words"
+              />
+
+              <Text style={styles.inputLabel}>Kart Numarası</Text>
+              <TextInput
+                style={styles.cardInput}
+                value={cardNumber}
+                onChangeText={(t) => {
+                  const digits = t.replace(/\D/g, "").slice(0, 16);
+                  setCardNumber(digits.replace(/(.{4})/g, "$1 ").trim());
+                }}
+                placeholder="0000 0000 0000 0000"
+                placeholderTextColor={colors.textTertiary}
+                keyboardType="number-pad"
+                maxLength={19}
+              />
+
+              <View style={styles.btnRow}>
+                <View style={styles.flex}>
+                  <Text style={styles.inputLabel}>Son Kullanma Ay</Text>
+                  <TextInput
+                    style={styles.cardInput}
+                    value={cardMonth}
+                    onChangeText={(t) => setCardMonth(t.replace(/\D/g, "").slice(0, 2))}
+                    placeholder="AA"
+                    placeholderTextColor={colors.textTertiary}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                  />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.inputLabel}>Yıl</Text>
+                  <TextInput
+                    style={styles.cardInput}
+                    value={cardYear}
+                    onChangeText={(t) => setCardYear(t.replace(/\D/g, "").slice(0, 4))}
+                    placeholder="YYYY"
+                    placeholderTextColor={colors.textTertiary}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                  />
+                </View>
+                <View style={[styles.flex, { flex: 0.8 }]}>
+                  <Text style={styles.inputLabel}>CVC</Text>
+                  <TextInput
+                    style={styles.cardInput}
+                    value={cardCvc}
+                    onChangeText={(t) => setCardCvc(t.replace(/\D/g, "").slice(0, 3))}
+                    placeholder="***"
+                    placeholderTextColor={colors.textTertiary}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                    maxLength={3}
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.secureNote}>{"🔒 Ödeme Iyzico altyapısıyla güvenle işlenir · Kart bilgileri PISP'te saklanmaz"}</Text>
+
+              <Pressable
+                style={[styles.payBtn, paymentLoading && styles.payBtnLoading]}
+                disabled={paymentLoading}
+                onPress={() => { void handleCardPayment(); }}
+              >
+                {paymentLoading
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={styles.payBtnText}>Ödeme Yap — {selectedPackage?.fallbackPrice}</Text>}
+              </Pressable>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
     </ScrollView>
@@ -643,6 +1161,38 @@ function OfferCard({ offer, onAccept }: { offer: MarketplaceOffer; onAccept: () 
   );
 }
 
+function StepRow({ n, icon, title, desc, last }: { n: number; icon: string; title: string; desc: string; last?: boolean }) {
+  return (
+    <View style={[styles.stepRow, !last && styles.stepRowBorder]}>
+      <View style={styles.stepLeft}>
+        <View style={styles.stepBadge}>
+          <Text style={styles.stepBadgeText}>{n}</Text>
+        </View>
+        {!last && <View style={styles.stepLine} />}
+      </View>
+      <View style={styles.stepContent}>
+        <View style={styles.stepTitleRow}>
+          <Text style={styles.stepIcon}>{icon}</Text>
+          <Text style={styles.stepTitle}>{title}</Text>
+        </View>
+        <Text style={styles.stepDesc}>{desc}</Text>
+      </View>
+    </View>
+  );
+}
+
+function FAQItem({ question, answer, open, onToggle }: { question: string; answer: string; open: boolean; onToggle: () => void }) {
+  return (
+    <Pressable style={[styles.faqItem, open && styles.faqItemOpen]} onPress={onToggle}>
+      <View style={styles.faqHeader}>
+        <Text style={styles.faqQuestion}>{question}</Text>
+        <Text style={[styles.faqChevron, open && styles.faqChevronOpen]}>{open ? "−" : "+"}</Text>
+      </View>
+      {open && <Text style={styles.faqAnswer}>{answer}</Text>}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   container: { gap: spacing.lg, padding: spacing.lg, paddingBottom: 40 },
@@ -668,6 +1218,8 @@ const styles = StyleSheet.create({
   walletBtn: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: radius.md, flex: 1, paddingVertical: spacing.md },
   redeemBtn: { backgroundColor: "rgba(255,255,255,0.25)" },
   walletBtnText: { color: colors.white, fontSize: 14, fontWeight: "600" },
+  buyTokensBtn: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.4)", borderRadius: radius.md, borderStyle: "dashed", borderWidth: 1, paddingVertical: spacing.sm },
+  buyTokensBtnText: { color: "rgba(255,255,255,0.9)", fontSize: 13, fontWeight: "700", letterSpacing: 0.3 },
   rateNote: { color: "rgba(255,255,255,0.45)", fontSize: 10, textAlign: "center" },
 
   // Filters
@@ -720,6 +1272,52 @@ const styles = StyleSheet.create({
   acceptBtn: { backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   acceptBtnText: { ...typography.label, color: colors.white },
 
+  // Education / Guide section
+  stepsCard: { backgroundColor: colors.bgCard, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
+  stepRow: { flexDirection: "row", gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.lg },
+  stepRowBorder: { borderBottomColor: colors.border, borderBottomWidth: 1 },
+  stepLeft: { alignItems: "center", width: 28 },
+  stepBadge: { alignItems: "center", backgroundColor: colors.accent, borderRadius: radius.full, height: 28, justifyContent: "center", width: 28 },
+  stepBadgeText: { color: colors.white, fontSize: 13, fontWeight: "800" },
+  stepLine: { backgroundColor: colors.border, flex: 1, marginTop: 4, width: 1 },
+  stepContent: { flex: 1, gap: 4, paddingTop: 3 },
+  stepTitleRow: { alignItems: "center", flexDirection: "row", gap: spacing.xs },
+  stepIcon: { fontSize: 16 },
+  stepTitle: { ...typography.label, color: colors.textPrimary },
+  stepDesc: { ...typography.caption, color: colors.textSecondary, lineHeight: 18 },
+
+  // Privacy card
+  privacyCard: { backgroundColor: "rgba(16,185,129,0.06)", borderColor: "rgba(16,185,129,0.25)", borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.lg },
+  privacyTitle: { ...typography.label, color: colors.success, fontSize: 15 },
+  privacyGrid: { gap: spacing.sm },
+  privacyItem: { alignItems: "flex-start", flexDirection: "row", gap: spacing.sm },
+  privacyCheck: { color: colors.success, fontSize: 13, fontWeight: "800", lineHeight: 20 },
+  privacyItemText: { ...typography.caption, color: colors.textSecondary, flex: 1, lineHeight: 18 },
+
+  // Earnings examples
+  earningsCard: { backgroundColor: colors.bgCard, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, padding: spacing.lg },
+  earningsTitle: { ...typography.label, color: colors.textPrimary, fontSize: 15 },
+  earningsSubtitle: { ...typography.caption, color: colors.textTertiary, marginBottom: spacing.xs },
+  earningsRow: { alignItems: "center", flexDirection: "row", gap: spacing.md, paddingVertical: spacing.xs },
+  earningsIcon: { fontSize: 20, width: 28 },
+  earningsLabel: { ...typography.caption, color: colors.textPrimary, fontWeight: "600" },
+  earningsCategory: { ...typography.caption, color: colors.textTertiary, marginTop: 1 },
+  earningsReward: { alignItems: "flex-end" },
+  earningsToken: { ...typography.caption, color: colors.accentLight, fontWeight: "700" },
+  earningsTL: { ...typography.caption, color: colors.success },
+  earningsTotalRow: { alignItems: "center", backgroundColor: colors.bgElevated, borderRadius: radius.md, flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  earningsTotalLabel: { ...typography.caption, color: colors.textSecondary },
+  earningsTotalValue: { ...typography.label, color: colors.success },
+
+  // FAQ
+  faqItem: { backgroundColor: colors.bgCard, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, marginBottom: spacing.xs, overflow: "hidden", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  faqItemOpen: { borderColor: colors.accent },
+  faqHeader: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
+  faqQuestion: { ...typography.label, color: colors.textPrimary, flex: 1 },
+  faqChevron: { color: colors.textTertiary, fontSize: 18, fontWeight: "300", width: 20, textAlign: "center" },
+  faqChevronOpen: { color: colors.accentLight },
+  faqAnswer: { ...typography.caption, color: colors.textSecondary, lineHeight: 20, marginTop: spacing.sm },
+
   // Feature unlock card
   featureCard: { backgroundColor: colors.bgCard, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, padding: spacing.lg },
   featureCardHeader: { alignItems: "center", flexDirection: "row", gap: spacing.md },
@@ -767,6 +1365,36 @@ const styles = StyleSheet.create({
   txPositive: { color: colors.success },
   txNegative: { color: colors.danger },
 
+  // Token purchase modal
+  buySheet: { maxHeight: "92%", paddingBottom: 0 },
+  buyHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.xs },
+  buyCloseX: { color: colors.textTertiary, fontSize: 20, fontWeight: "300", padding: spacing.xs },
+  buySubtitle: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.lg },
+  packageGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.lg },
+  packageCard: { alignItems: "center", backgroundColor: colors.bgElevated, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1.5, gap: 3, paddingHorizontal: spacing.md, paddingVertical: spacing.md, width: "47%" },
+  packageCardSelected: { backgroundColor: colors.accentDim, borderColor: colors.accent },
+  packageCardPopular: { borderColor: "#f59e0b" },
+  packageCardDim: { opacity: 0.6 },
+  popularBadge: { backgroundColor: "#f59e0b", borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  popularBadgeText: { color: "#000", fontSize: 9, fontWeight: "800", letterSpacing: 0.5 },
+  packageTokens: { color: colors.textPrimary, fontSize: 22, fontWeight: "900" },
+  packagePrice: { color: colors.success, fontSize: 16, fontWeight: "700" },
+  packageBonus: { color: colors.accentLight, fontSize: 10, fontWeight: "600" },
+  packageLabel: { ...typography.caption, color: colors.textTertiary },
+  cardForm: { gap: spacing.sm, marginBottom: spacing.lg },
+  cardFormHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.xs },
+  cardFormTitle: { ...typography.label, color: colors.textPrimary },
+  cardBrands: { flexDirection: "row", gap: spacing.xs },
+  cardBrandText: { backgroundColor: colors.bgElevated, borderColor: colors.border, borderRadius: 3, borderWidth: 1, color: colors.textTertiary, fontSize: 9, fontWeight: "700", paddingHorizontal: 5, paddingVertical: 2 },
+  inputLabel: { ...typography.caption, color: colors.textSecondary, marginBottom: 4 },
+  cardInput: { backgroundColor: colors.bgElevated, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, color: colors.textPrimary, fontSize: 16, fontWeight: "600", letterSpacing: 0.5, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  cardRow2: { flexDirection: "row" },
+  orderSummary: { backgroundColor: colors.bgElevated, borderRadius: radius.md, gap: spacing.sm, marginTop: spacing.sm, padding: spacing.md },
+  payBtn: { alignItems: "center", backgroundColor: colors.success, borderRadius: radius.md, paddingVertical: spacing.lg },
+  payBtnLoading: { opacity: 0.7 },
+  payBtnText: { color: colors.white, fontSize: 15, fontWeight: "800" },
+  secureNote: { ...typography.caption, color: colors.textTertiary, textAlign: "center" },
+
   // Modals
   overlay: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.7)", flex: 1, justifyContent: "center", padding: spacing.xl },
   sheet: { backgroundColor: colors.bgCard, borderRadius: radius.xl, gap: spacing.lg, padding: spacing.xl, width: "100%" },
@@ -781,17 +1409,34 @@ const styles = StyleSheet.create({
   confirmBtnText: { ...typography.label, color: colors.white },
   amountInput: { backgroundColor: colors.bgElevated, borderColor: colors.border, borderRadius: radius.sm, borderWidth: 1, color: colors.textPrimary, fontSize: 24, fontWeight: "700", paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, textAlign: "center" },
 
-  // Redeem info modal
-  redeemInfoCard: { backgroundColor: colors.bgElevated, borderRadius: radius.md, gap: spacing.sm, padding: spacing.lg },
+  // Redeem rows (used in withdrawal modal)
   redeemRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   redeemLabel: { ...typography.caption, color: colors.textSecondary },
   redeemValue: { ...typography.label, color: colors.textPrimary },
-  redeemDivider: { backgroundColor: colors.border, height: 1 },
-  redeemWebCard: { backgroundColor: colors.accentDim, borderColor: colors.accent, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, padding: spacing.lg },
-  redeemWebTitle: { ...typography.label, color: colors.accentLight },
-  redeemWebBody: { ...typography.caption, color: colors.textSecondary, lineHeight: 18 },
-  redeemWebBtn: { alignItems: "center", backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md },
-  redeemWebBtnText: { ...typography.label, color: colors.white },
+
+  // Calculator card
+  calcCard: { backgroundColor: colors.bgCard, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.lg },
+  calcRow: { alignItems: "center", flexDirection: "row", gap: spacing.md },
+  calcLabel: { ...typography.caption, color: colors.textSecondary, marginBottom: 4 },
+  calcBarBg: { backgroundColor: colors.bgElevated, borderRadius: radius.full, height: 6, overflow: "hidden" },
+  calcBarFill: { backgroundColor: colors.accent, borderRadius: radius.full, height: "100%" },
+  calcReward: { alignItems: "flex-end", minWidth: 70 },
+  calcTokens: { ...typography.caption, color: colors.accentLight, fontWeight: "700" },
+  calcTL: { ...typography.caption, color: colors.success },
+  calcNote: { ...typography.caption, color: colors.textTertiary, fontStyle: "italic", textAlign: "center" },
+
+  // Withdrawal flow
+  withdrawProgress: { flexDirection: "row", gap: 6, justifyContent: "center", marginBottom: spacing.lg },
+  withdrawDot: { backgroundColor: colors.border, borderRadius: radius.full, height: 8, width: 8 },
+  withdrawDotActive: { backgroundColor: colors.accent, width: 24 },
+  withdrawBody: { gap: spacing.md },
+  withdrawBalanceCard: { alignItems: "center", backgroundColor: colors.accentDim, borderColor: colors.accent, borderRadius: radius.lg, borderWidth: 1, gap: 4, padding: spacing.lg },
+  withdrawBalanceLabel: { ...typography.caption, color: colors.textSecondary },
+  withdrawBalanceValue: { color: colors.white, fontSize: 32, fontWeight: "900" },
+  withdrawBalanceTL: { ...typography.caption, color: colors.accentLight },
+  withdrawSuccessIcon: { alignItems: "center", marginVertical: spacing.md },
+  withdrawSuccessTitle: { ...typography.heading2, color: colors.textPrimary, textAlign: "center" },
+  withdrawSuccessDesc: { ...typography.body, color: colors.textSecondary, textAlign: "center", lineHeight: 22 },
 
   // Scan
   scanShell: { backgroundColor: colors.bg, flex: 1, gap: spacing.xl, justifyContent: "center", padding: spacing.xl },

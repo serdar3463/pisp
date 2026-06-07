@@ -23,7 +23,7 @@ import { VaultModule } from "./src/components/VaultModule";
 import { ShareModule } from "./src/components/ShareModule";
 import { HistoryModule } from "./src/components/HistoryModule";
 import { MarketplaceModule } from "./src/components/MarketplaceModule";
-import { getBiometricStatus, unlockLocalVault } from "./src/services/appLock";
+import { getBiometricStatus } from "./src/services/appLock";
 import {
   PrivateVaultSnapshot,
   clearPrivateVault,
@@ -60,21 +60,6 @@ const MODULES: Array<{ id: ModuleId; label: string; icon: string }> = [
 
 type BadgeCounts = Partial<Record<ModuleId, number>>;
 
-const RETIRED_DEMO_VALUES = new Set([
-  "Serdar Yılmaz", "2001-08-22", "Türkiye",
-  "serdar@example.com", "+90 555 013 42 42", "İstanbul", "@serdar",
-  "Aile yakını yalnızca yerelde saklanır", "Mobil geliştirici",
-  "React Native, TypeScript, Mahremiyet mühendisliği", "pisp.dev/serdar",
-  "Bireysel mükellef", "Şablon üreticisi", "2042", "Gizli", "700+",
-  "A Rh+", "Penisilin", "Haftalık aktif dakika: 210",
-  "Geçerli kimlik belgesi hazır", "AB konferans seyahati",
-  "Bilgisayar Mühendisliği", "Kişisel veri egemenliği",
-  "Yerel görsel referansı", "PISP ürün ekranları", "Mezuniyet planı: 2026",
-  "Özel aile notu", "Önce fayda, sonra mahremiyet değil; ikisi birlikte",
-  "Varsayılan olarak asla paylaşılmaz", "did:key:z6Mk-pisp",
-  "Yalnızca yerel politika kontrolleri", "3 doğrulanmış proje referansı",
-  "Doğrulanmış katkı sağlayıcı"
-]);
 
 export default function App() {
   return (
@@ -105,8 +90,6 @@ function RootApp() {
   const [documents, setDocuments] = useState<StoredDocument[]>([]);
   const [onboardingAccepted, setOnboardingAccepted] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
-  const [isLocked, setIsLocked] = useState(true);
-  const [lockMessage, setLockMessage] = useState("Kasa kilitli");
   const [showAgent, setShowAgent] = useState(false);
 
   const allTemplates = useMemo(() => customTemplates, [customTemplates]);
@@ -125,7 +108,7 @@ function RootApp() {
     loadPrivateVault()
       .then((snapshot) => {
         if (!mounted) return;
-        setVaultValues(removeDemoValues(snapshot.vaultValues));
+        setVaultValues(snapshot.vaultValues);
         setPolicy(snapshot.policy);
         setShareCounts(snapshot.shareCounts);
         setReceipts(snapshot.receipts);
@@ -163,9 +146,7 @@ function RootApp() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active" && onboardingAccepted) {
-        setIsLocked(true);
-        setLockMessage("Uygulama arka plana alındığı için kasa kilitlendi");
+      if (state !== "active") {
         void savePrivateVault({ vaultValues, policy, shareCounts, receipts, customTemplates, onboardingAccepted, tokenBalance, isPremium, tokenHistory, acceptedOfferIds, scannedOffers, documents, updatedAt: new Date().toISOString() });
       }
     });
@@ -221,13 +202,15 @@ function RootApp() {
 
   async function acceptOffer(offer: MarketplaceOffer) {
     try {
-      const identity = await getOrCreateDeviceIdentity();
-      const result = await pispApi.acceptOffer(offer.id, identity.did);
-      const userReward = result.reward;
-      const commission = offer.reward - userReward;
+      let reward = offer.reward;
+      if (!offer.id.startsWith("sample-")) {
+        const identity = await getOrCreateDeviceIdentity();
+        const result = await pispApi.acceptOffer(offer.id, identity.did);
+        reward = result.reward;
+      }
       setAcceptedOfferIds((prev) => [...prev, offer.id]);
-      addTokenTransaction({ type: "earned", amount: userReward, label: `${offer.company} — veri talebi` });
-      toast.show(`+${userReward} 💎 kazandın (komisyon: ${commission} 💎)`, "success");
+      addTokenTransaction({ type: "earned", amount: reward, label: `${offer.company} — veri talebi` });
+      toast.show(`+${reward} 💎 kazandın!`, "success");
     } catch (e) {
       toast.show((e as Error).message ?? "Teklif kabul edilemedi", "danger");
     }
@@ -244,14 +227,16 @@ function RootApp() {
       reward: qr.reward,
       expiresInHours: qr.expiresInHours
     };
-    try {
-      const validation = await pispApi.validateOffer(qr.id);
-      if (!validation.valid) {
-        toast.show(validation.error ?? "Teklif geçersiz", "danger");
-        return;
+    if (!qr.id.startsWith("sample-")) {
+      try {
+        const validation = await pispApi.validateOffer(qr.id);
+        if (!validation.valid) {
+          toast.show(validation.error ?? "Teklif geçersiz", "danger");
+          return;
+        }
+      } catch {
+        // Backend unreachable — still add offer, will fail on accept
       }
-    } catch {
-      // Backend unreachable — still add offer, will fail on accept
     }
     setScannedOffers((prev) => {
       if (prev.some((o) => o.id === offer.id)) return prev;
@@ -313,7 +298,6 @@ function RootApp() {
     setAcceptedOfferIds([]);
     setDocuments([]);
     setOnboardingAccepted(false);
-    setIsLocked(true);
   }
 
   function panicClose() {
@@ -373,12 +357,6 @@ function RootApp() {
     setShareCounts((current) => ({ ...current, [template.id]: (current[template.id] ?? 0) + 1 }));
   }
 
-  async function unlock() {
-    const result = await unlockLocalVault();
-    setLockMessage(result.message);
-    if (result.ok) setIsLocked(false);
-  }
-
   if (!storageReady) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -402,19 +380,12 @@ function RootApp() {
       <OnboardingScreen
         onAccept={() => {
           setOnboardingAccepted(true);
-          setIsLocked(false);
           addTokenTransaction({ type: "earned", amount: 50, label: "🎉 Hoş geldin bonusu" });
           void savePrivateVault({ vaultValues, policy, shareCounts, receipts, customTemplates, onboardingAccepted: true, tokenBalance, isPremium, tokenHistory, acceptedOfferIds, scannedOffers, documents, updatedAt: new Date().toISOString() });
         }}
       />
     );
   }
-
-  if (isLocked) {
-    return <LockScreen message={lockMessage} onUnlock={unlock} />;
-  }
-
-  const lockFn = () => { setLockMessage("Kasa manuel olarak kilitlendi"); setIsLocked(true); };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -436,9 +407,6 @@ function RootApp() {
             <Text style={styles.headerSub}>Kişisel veri kasası</Text>
           </View>
         </View>
-        <Pressable style={styles.lockBtn} onPress={lockFn}>
-          <Text style={styles.lockBtnText}>🔒</Text>
-        </Pressable>
       </View>
 
       {/* ── Modül İçeriği ─────────────────────────────── */}
@@ -502,7 +470,7 @@ function RootApp() {
             backupSnapshot={{ vaultValues, policy, shareCounts, receipts, customTemplates, onboardingAccepted, tokenBalance, isPremium, tokenHistory, acceptedOfferIds, scannedOffers, documents, updatedAt: new Date().toISOString() }}
             onRevoke={revokeReceipt}
             onRestoreBackup={restoreSnapshot}
-            onLock={lockFn}
+            onLock={() => {}}
             onWipe={wipeLocalData}
           />
         )}
@@ -726,42 +694,6 @@ function OnboardingScreen({ onAccept }: { onAccept: () => void }) {
   );
 }
 
-function LockScreen({ message, onUnlock }: { message: string; onUnlock: () => void | Promise<void> }) {
-  return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
-      <View style={styles.lockShell}>
-        <View style={styles.lockLogoWrap}>
-          <View style={styles.lockLogo}>
-            <Text style={styles.lockLogoText}>🔐</Text>
-          </View>
-        </View>
-        <Text style={styles.lockTitle}>Kasa Kilitli</Text>
-        <Text style={styles.lockSub}>{message}</Text>
-
-        <View style={styles.lockInfoCard}>
-          <View style={styles.lockInfoRow}>
-            <Text style={styles.lockInfoDot}>·</Text>
-            <Text style={styles.lockInfoText}>Veriler cihazınızda şifreli</Text>
-          </View>
-          <View style={styles.lockInfoRow}>
-            <Text style={styles.lockInfoDot}>·</Text>
-            <Text style={styles.lockInfoText}>Biometrik veya PIN ile açılır</Text>
-          </View>
-          <View style={styles.lockInfoRow}>
-            <Text style={styles.lockInfoDot}>·</Text>
-            <Text style={styles.lockInfoText}>Yalnızca siz erişebilirsiniz</Text>
-          </View>
-        </View>
-
-        <Pressable style={styles.unlockBtn} onPress={onUnlock}>
-          <Text style={styles.unlockBtnText}>Kasayı Aç</Text>
-        </Pressable>
-      </View>
-    </SafeAreaView>
-  );
-}
-
 function BottomTabBar({ active, onSelect, badges }: { active: ModuleId; onSelect: (id: ModuleId) => void; badges?: BadgeCounts }) {
   return (
     <View style={styles.bottomBar}>
@@ -787,13 +719,6 @@ function BottomTabBar({ active, onSelect, badges }: { active: ModuleId; onSelect
   );
 }
 
-function removeDemoValues(values: VaultValues): VaultValues {
-  const cleaned: VaultValues = { ...initialVaultValues };
-  for (const [key, value] of Object.entries(values)) {
-    cleaned[key] = RETIRED_DEMO_VALUES.has(value) ? "" : value;
-  }
-  return cleaned;
-}
 
 const styles = StyleSheet.create({
   safe: { backgroundColor: colors.bg, flex: 1 },

@@ -7,6 +7,8 @@ import companiesRouter from "./routes/companies";
 import offersRouter from "./routes/offers";
 import paymentsRouter from "./routes/payments";
 import withdrawalsRouter from "./routes/withdrawals";
+import agentRouter from "./routes/agent";
+import adminRouter from "./routes/adminPanel";
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
@@ -22,6 +24,8 @@ app.use("/api/companies", companiesRouter);
 app.use("/api/offers", offersRouter);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/withdrawals", withdrawalsRouter);
+app.use("/api/agent", agentRouter);
+app.use("/admin", adminRouter);
 
 // Health check
 app.get("/api/health", (_req, res) => {

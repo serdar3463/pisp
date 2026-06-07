@@ -35,6 +35,20 @@ export interface WithdrawalStatus {
   notes?: string;
 }
 
+export interface PurchaseResult {
+  success: boolean;
+  tokens: number;
+  paymentId: string;
+}
+
+export interface CardInfo {
+  cardHolderName: string;
+  cardNumber: string;
+  expireMonth: string;
+  expireYear: string;
+  cvc: string;
+}
+
 export const pispApi = {
   validateOffer(offerId: string): Promise<OfferValidation> {
     return request<OfferValidation>("GET", `/api/offers/${offerId}/validate`);
@@ -50,5 +64,13 @@ export const pispApi = {
 
   getWithdrawalStatus(requestId: string): Promise<WithdrawalStatus> {
     return request<WithdrawalStatus>("GET", `/api/withdrawals/${requestId}/status`);
+  },
+
+  purchaseTokens(deviceId: string, packageId: string, card: CardInfo): Promise<PurchaseResult> {
+    return request<PurchaseResult>("POST", "/api/payments/user-purchase", { deviceId, packageId, ...card });
+  },
+
+  submitWithdrawalIban(requestId: string, iban: string, holderName: string): Promise<{ requestId: string; status: string }> {
+    return request("PATCH", `/api/withdrawals/${requestId}/iban`, { iban, holderName });
   },
 };

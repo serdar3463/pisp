@@ -84,6 +84,18 @@ db.exec(`
     created_at  TEXT NOT NULL,
     processed_at TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS user_payments (
+    id          TEXT PRIMARY KEY,
+    device_hash TEXT NOT NULL,
+    package_id  TEXT NOT NULL,
+    tokens      INTEGER NOT NULL,
+    price_try   REAL NOT NULL,
+    card_holder TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'completed',
+    iyzico_payment_id TEXT,
+    created_at  TEXT NOT NULL
+  );
 `);
 
 // Seed token packages if empty

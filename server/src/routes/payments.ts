@@ -79,6 +79,65 @@ router.post("/initiate", requireAuth, (req, res) => {
   });
 });
 
+// POST /api/payments/user-purchase  — mobile user buys tokens directly
+const USER_PACKAGES: Record<string, { label: string; tokens: number; price_try: number }> = {
+  pkg_100:  { label: "Başlangıç",   tokens: 100,  price_try: 15  },
+  pkg_300:  { label: "Popüler",     tokens: 300,  price_try: 40  },
+  pkg_500:  { label: "Avantajlı",   tokens: 500,  price_try: 60  },
+  pkg_1000: { label: "Süper Değer", tokens: 1000, price_try: 110 },
+};
+
+router.post("/user-purchase", (req, res) => {
+  const { deviceId, packageId, cardHolderName, cardNumber, expireMonth, expireYear, cvc } = req.body as {
+    deviceId: string; packageId: string;
+    cardHolderName: string; cardNumber: string;
+    expireMonth: string; expireYear: string; cvc: string;
+  };
+
+  if (!deviceId || !packageId || !cardHolderName || !cardNumber || !expireMonth || !expireYear || !cvc) {
+    res.status(400).json({ error: "Eksik kart bilgisi" }); return;
+  }
+
+  const pkg = USER_PACKAGES[packageId];
+  if (!pkg) { res.status(404).json({ error: "Paket bulunamadı" }); return; }
+
+  const paymentId = uuid();
+  const conversationId = `user-${paymentId.slice(0, 8)}`;
+  const shortDevice = deviceId.slice(-8);
+  const holderParts = cardHolderName.trim().split(" ");
+
+  const iyzipay = getIyzipay();
+  const request = {
+    locale: "tr",
+    conversationId,
+    price: pkg.price_try.toFixed(2),
+    paidPrice: pkg.price_try.toFixed(2),
+    currency: "TRY",
+    installment: "1",
+    basketId: paymentId,
+    paymentChannel: "MOBILE",
+    paymentGroup: "PRODUCT",
+    paymentCard: { cardHolderName, cardNumber: cardNumber.replace(/\s/g, ""), expireMonth, expireYear, cvc, registerCard: "0" },
+    buyer: { id: shortDevice, name: holderParts[0] ?? "PISP", surname: holderParts.slice(1).join(" ") || "User", gsmNumber: "+905000000000", email: `user-${shortDevice}@pisp.app`, identityNumber: "11111111111", registrationAddress: "Türkiye", ip: "85.34.78.112", city: "Istanbul", country: "Turkey", zipCode: "34732" },
+    shippingAddress: { contactName: cardHolderName, city: "Istanbul", country: "Turkey", address: "Türkiye", zipCode: "34732" },
+    billingAddress: { contactName: cardHolderName, city: "Istanbul", country: "Turkey", address: "Türkiye", zipCode: "34732" },
+    basketItems: [{ id: packageId, name: `PISP ${pkg.label} Token Paketi`, category1: "Dijital Ürün", itemType: "VIRTUAL", price: pkg.price_try.toFixed(2) }],
+  };
+
+  const deviceHash = require("crypto").createHash("sha256").update(deviceId).digest("hex") as string;
+
+  iyzipay.payment.create(request, (err: Error, result: { status: string; paymentId?: string; errorMessage?: string }) => {
+    if (err || result.status !== "success") {
+      res.status(402).json({ error: result?.errorMessage ?? "Ödeme başarısız" }); return;
+    }
+    db.prepare(`
+      INSERT INTO user_payments (id, device_hash, package_id, tokens, price_try, card_holder, status, iyzico_payment_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?)
+    `).run(paymentId, deviceHash, packageId, pkg.tokens, pkg.price_try, cardHolderName, result.paymentId ?? paymentId, new Date().toISOString());
+    res.json({ success: true, tokens: pkg.tokens, paymentId: result.paymentId ?? paymentId });
+  });
+});
+
 // GET /api/payments/history
 router.get("/history", requireAuth, (req, res) => {
   const { companyId } = (req as Request & { company: { companyId: string } }).company;
