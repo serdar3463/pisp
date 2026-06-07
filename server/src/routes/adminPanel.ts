@@ -4,21 +4,25 @@ import db from "../db";
 
 const router = Router();
 
-// ── HTTP Basic Auth ──────────────────────────────────────────────────────────
+// ── Auth ─────────────────────────────────────────────────────────────────────
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const adminPassword = process.env.ADMIN_PASSWORD;
-  if (!adminPassword) { next(); return; } // No password configured → open
+  if (!adminPassword) { next(); return; }
 
-  const auth = req.headers.authorization ?? "";
-  if (!auth.startsWith("Basic ")) {
-    res.setHeader("WWW-Authenticate", 'Basic realm="PISP Admin"');
-    res.status(401).send("Giriş gerekli");
-    return;
-  }
-  const [, password] = Buffer.from(auth.slice(6), "base64").toString().split(":");
-  if (password !== adminPassword) {
-    res.setHeader("WWW-Authenticate", 'Basic realm="PISP Admin"');
-    res.status(401).send("Yanlış şifre");
+  const provided = (req.query.key as string | undefined) ?? req.headers["x-admin-key"] as string | undefined;
+  if (!provided || provided !== adminPassword) {
+    res.status(401).send(`<!DOCTYPE html><html><head><meta charset=UTF-8><title>PISP Admin</title>
+<style>body{font-family:sans-serif;background:#0a0a0f;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+form{background:#13131f;border:1px solid #1e1e2e;border-radius:12px;padding:32px;display:flex;flex-direction:column;gap:12px;min-width:280px}
+h2{margin:0;color:#6366f1;font-size:20px}
+input{background:#0a0a0f;border:1px solid #1e1e2e;border-radius:8px;padding:10px;color:#e2e8f0;font-size:14px}
+button{background:#6366f1;color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer}
+</style></head><body>
+<form method="GET" action="/admin">
+<h2>💎 PISP Admin</h2>
+<input type="password" name="key" placeholder="Admin şifresi" autofocus />
+<button type="submit">Giriş</button>
+</form></body></html>`);
     return;
   }
   next();
@@ -74,7 +78,9 @@ router.get("/payments", (_req, res) => {
 });
 
 // ── Admin HTML Panel ─────────────────────────────────────────────────────────
-router.get("/", (_req, res) => {
+router.get("/", (req, res) => {
+  const key = (req.query.key as string | undefined) ?? "";
+  const q = key ? `?key=${encodeURIComponent(key)}` : "";
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!DOCTYPE html>
 <html lang="tr">
@@ -161,6 +167,9 @@ router.get("/", (_req, res) => {
 <div id="toast">Kaydedildi</div>
 
 <script>
+const AK = "${q}";
+function u(path) { return path + AK; }
+
 function showTab(name) {
   document.querySelectorAll('.tab').forEach((t,i) => {
     t.classList.toggle('active', ['withdrawals','payments'][i] === name);
@@ -181,7 +190,7 @@ function fmt(dt) {
 }
 
 async function loadStats() {
-  const r = await fetch('/admin/stats').then(x=>x.json()).catch(()=>({}));
+  const r = await fetch(u('/admin/stats')).then(x=>x.json()).catch(()=>({}));
   const el = document.getElementById('stats');
   el.innerHTML = \`
     <div class="stat"><div class="stat-val">\${r.uniqueDevices??0}</div><div class="stat-label">Aktif Cihaz</div></div>
@@ -193,7 +202,7 @@ async function loadStats() {
 }
 
 async function loadWithdrawals() {
-  const r = await fetch('/admin/withdrawals').then(x=>x.json()).catch(()=>({withdrawals:[]}));
+  const r = await fetch(u('/admin/withdrawals')).then(x=>x.json()).catch(()=>({withdrawals:[]}));
   const rows = r.withdrawals ?? [];
   const tbody = document.getElementById('wr-body');
   if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">Henüz çekim talebi yok</td></tr>';return;}
@@ -216,7 +225,7 @@ async function loadWithdrawals() {
 }
 
 async function loadPayments() {
-  const r = await fetch('/admin/payments').then(x=>x.json()).catch(()=>({payments:[]}));
+  const r = await fetch(u('/admin/payments')).then(x=>x.json()).catch(()=>({payments:[]}));
   const rows = r.payments ?? [];
   const tbody = document.getElementById('pay-body');
   if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">Henüz token satışı yok</td></tr>';return;}
@@ -236,7 +245,7 @@ async function loadPayments() {
 async function updateWithdrawal(id, status) {
   const label = status==='completed' ? 'Ödendi olarak işaretlensin mi?' : 'Reddedilsin mi?';
   if(!confirm(label)) return;
-  await fetch(\`/admin/withdrawals/\${id}\`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  await fetch(u(\`/admin/withdrawals/\${id}\`), {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
   showToast(status==='completed' ? '✓ Ödendi olarak işaretlendi' : '✗ Reddedildi');
   loadWithdrawals();
   loadStats();
