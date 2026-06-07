@@ -29,7 +29,7 @@ app.use("/admin", adminRouter);
 
 // Health check
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", version: "1.0.0", timestamp: new Date().toISOString() });
+  res.json({ status: "ok", version: "1.0.5-admin", timestamp: new Date().toISOString() });
 });
 
 // SPA fallback — company portal pages
