@@ -1,5 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  endConnection,
+  finishTransaction,
+  fetchProducts,
+  initConnection,
+  purchaseErrorListener,
+  purchaseUpdatedListener,
+  requestPurchase,
+} from "react-native-iap";
+import type { ProductIOS, Purchase, PurchaseError } from "react-native-iap";
 import QRCode from "react-native-qrcode-svg";
 import { BarcodeScanningResult, CameraView, useCameraPermissions } from "expo-camera";
 
@@ -149,14 +159,10 @@ export function MarketplaceModule(props: Props) {
 
   // Payment state
   const [showBuyTokens, setShowBuyTokens] = useState(false);
-  const [selectedPackage, setSelectedPackage] = useState<TokenPackage | null>(null);
-  const [showCardForm, setShowCardForm] = useState(false);
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [cardHolder, setCardHolder] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardMonth, setCardMonth] = useState("");
-  const [cardYear, setCardYear] = useState("");
-  const [cardCvc, setCardCvc] = useState("");
+  const [iapReady, setIapReady] = useState(false);
+  const [iapProducts, setIapProducts] = useState<ProductIOS[]>([]);
+  const [purchaseLoading, setPurchaseLoading] = useState<string | null>(null);
+  const pendingPkgRef = useRef<TokenPackage | null>(null);
 
   // FAQ accordion state
   const [faqOpen, setFaqOpen] = useState<Record<string, boolean>>({});
@@ -165,6 +171,37 @@ export function MarketplaceModule(props: Props) {
     getOrCreateDeviceIdentity()
       .then((id) => setDeviceShortId(id.did.slice(-8)))
       .catch(() => setDeviceShortId("——"));
+  }, []);
+
+  useEffect(() => {
+    const skus = TOKEN_PACKAGES.map((p) => p.sku);
+    initConnection()
+      .then(() => fetchProducts({ skus }))
+      .then((products) => { setIapProducts(products as ProductIOS[]); setIapReady(true); })
+      .catch(() => setIapReady(false));
+
+    const updateSub = purchaseUpdatedListener(async (purchase: Purchase) => {
+      const pkg = pendingPkgRef.current ?? TOKEN_PACKAGES.find((p) => p.sku === purchase.productId);
+      if (pkg) props.onReceiveTokens(pkg.tokens, `${pkg.label} paketi satın alındı`);
+      await finishTransaction({ purchase, isConsumable: true }).catch(() => {});
+      setPurchaseLoading(null);
+      pendingPkgRef.current = null;
+      setShowBuyTokens(false);
+    });
+
+    const errorSub = purchaseErrorListener((error: PurchaseError) => {
+      setPurchaseLoading(null);
+      pendingPkgRef.current = null;
+      if ((error.code as string) !== "E_USER_CANCELLED") {
+        Alert.alert("Ödeme Hatası", error.message || "Satın alma başarısız.");
+      }
+    });
+
+    return () => {
+      updateSub.remove();
+      errorSub.remove();
+      endConnection();
+    };
   }, []);
 
   const visibleOffers = props.scannedOffers
@@ -263,63 +300,24 @@ export function MarketplaceModule(props: Props) {
     );
   }
 
-  const SKU_TO_PACKAGE_ID: Record<string, string> = {
-    "com.pisp.mobile.tokens.100": "pkg_100",
-    "com.pisp.mobile.tokens.300": "pkg_300",
-    "com.pisp.mobile.tokens.500": "pkg_500",
-    "com.pisp.mobile.tokens.1000": "pkg_1000",
-  };
-
-  function closeBuyModal() {
+  async function handleIAPPurchase(pkg: TokenPackage) {
+    if (!iapReady || purchaseLoading) return;
+    pendingPkgRef.current = pkg;
+    setPurchaseLoading(pkg.sku);
     setShowBuyTokens(false);
-    setSelectedPackage(null);
-  }
-
-  function closeCardForm() {
-    setShowCardForm(false);
-    setSelectedPackage(null);
-    setCardHolder("");
-    setCardNumber("");
-    setCardMonth("");
-    setCardYear("");
-    setCardCvc("");
-  }
-
-  function selectPackageForPayment(pkg: TokenPackage) {
-    setSelectedPackage(pkg);
-    setShowBuyTokens(false);
-    setShowCardForm(true);
-  }
-
-  async function handleCardPayment() {
-    if (!selectedPackage || paymentLoading) return;
-    if (!cardHolder.trim() || cardNumber.replace(/\s/g, "").length < 16 || !cardMonth || !cardYear || cardCvc.length < 3) {
-      Alert.alert("Eksik Bilgi", "Lütfen tüm kart bilgilerini eksiksiz girin.");
-      return;
-    }
-    setPaymentLoading(true);
     try {
-      const identity = await getOrCreateDeviceIdentity();
-      const result = await pispApi.purchaseTokens(
-        identity.did,
-        SKU_TO_PACKAGE_ID[selectedPackage.sku] ?? "",
-        {
-          cardHolderName: cardHolder.trim(),
-          cardNumber: cardNumber.replace(/\s/g, ""),
-          expireMonth: cardMonth,
-          expireYear: cardYear,
-          cvc: cardCvc,
-        }
-      );
-      props.onReceiveTokens(result.tokens, `${selectedPackage.label} paketi satın alındı`);
-      closeCardForm();
-      setShowBuyTokens(false);
-    } catch (e) {
-      Alert.alert("Ödeme Hatası", (e as Error).message || "Ödeme işlemi başarısız. Kart bilgilerinizi kontrol edip tekrar deneyin.");
-    } finally {
-      setPaymentLoading(false);
+      await requestPurchase({ request: { apple: { sku: pkg.sku } }, type: "in-app" });
+    } catch {
+      setPurchaseLoading(null);
+      pendingPkgRef.current = null;
     }
   }
+
+  function iapPrice(sku: string, fallback: string) {
+    const p = iapProducts.find((x) => x.id === sku);
+    return p?.displayPrice ?? fallback;
+  }
+
 
   function toggleFaq(q: string) {
     setFaqOpen((prev) => ({ ...prev, [q]: !prev[q] }));
@@ -979,137 +977,36 @@ export function MarketplaceModule(props: Props) {
           <View style={[styles.sheet, styles.buySheet]}>
             <View style={styles.buyHeader}>
               <Text style={styles.sheetTitle}>Token Satın Al</Text>
-              <Pressable onPress={closeBuyModal} hitSlop={12}>
+              <Pressable onPress={() => setShowBuyTokens(false)} hitSlop={12}>
                 <Text style={styles.buyCloseX}>✕</Text>
               </Pressable>
             </View>
-            <Text style={styles.buySubtitle}>Paket seç — kart bilgilerini gir — tokenlar anında gelir.</Text>
+            <Text style={styles.buySubtitle}>Paket seç — Apple Pay ile güvenle öde — tokenlar anında gelir.</Text>
 
             <View style={styles.packageGrid}>
               {TOKEN_PACKAGES.map((pkg) => (
                 <Pressable
                   key={pkg.sku}
-                  style={[styles.packageCard, pkg.popular && styles.packageCardPopular]}
-                  onPress={() => selectPackageForPayment(pkg)}
+                  style={[styles.packageCard, pkg.popular && styles.packageCardPopular, purchaseLoading === pkg.sku && styles.packageCardDim]}
+                  onPress={() => { void handleIAPPurchase(pkg); }}
+                  disabled={!!purchaseLoading || !iapReady}
                 >
                   {pkg.popular && <View style={styles.popularBadge}><Text style={styles.popularBadgeText}>Popüler</Text></View>}
                   <Text style={styles.packageTokens}>{pkg.tokens} 💎</Text>
-                  <Text style={styles.packagePrice}>{pkg.fallbackPrice}</Text>
+                  {purchaseLoading === pkg.sku
+                    ? <ActivityIndicator size="small" color={colors.accent} />
+                    : <Text style={styles.packagePrice}>{iapPrice(pkg.sku, pkg.fallbackPrice)}</Text>}
                   {pkg.bonus && <Text style={styles.packageBonus}>{pkg.bonus}</Text>}
                   <Text style={styles.packageLabel}>{pkg.label}</Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={styles.secureNote}>🔒 Iyzico altyapısıyla güvenli ödeme · Kart bilgileri saklanmaz</Text>
+            <Text style={styles.secureNote}>🔒 Apple In-App Purchase · Güvenli ve korumalı ödeme</Text>
           </View>
         </View>
       </Modal>
 
-      {/* ── Kart Ödeme Formu ─────────────────────── */}
-      <Modal visible={showCardForm} transparent animationType="slide">
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.overlay}>
-          <View style={[styles.sheet, { maxHeight: "90%" }]}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.buyHeader}>
-                <Text style={styles.sheetTitle}>Kart Bilgileri</Text>
-                <Pressable onPress={closeCardForm} hitSlop={12}>
-                  <Text style={styles.buyCloseX}>✕</Text>
-                </Pressable>
-              </View>
-
-              {selectedPackage && (
-                <View style={styles.orderSummary}>
-                  <View style={styles.redeemRow}>
-                    <Text style={styles.redeemLabel}>Paket</Text>
-                    <Text style={styles.redeemValue}>{selectedPackage.label} — {selectedPackage.tokens} 💎</Text>
-                  </View>
-                  <View style={styles.redeemRow}>
-                    <Text style={styles.redeemLabel}>Tutar</Text>
-                    <Text style={[styles.redeemValue, { color: colors.success }]}>{selectedPackage.fallbackPrice}</Text>
-                  </View>
-                </View>
-              )}
-
-              <Text style={styles.inputLabel}>Kart Sahibi Adı Soyadı</Text>
-              <TextInput
-                style={styles.cardInput}
-                value={cardHolder}
-                onChangeText={setCardHolder}
-                placeholder="AD SOYAD"
-                placeholderTextColor={colors.textTertiary}
-                autoCapitalize="words"
-              />
-
-              <Text style={styles.inputLabel}>Kart Numarası</Text>
-              <TextInput
-                style={styles.cardInput}
-                value={cardNumber}
-                onChangeText={(t) => {
-                  const digits = t.replace(/\D/g, "").slice(0, 16);
-                  setCardNumber(digits.replace(/(.{4})/g, "$1 ").trim());
-                }}
-                placeholder="0000 0000 0000 0000"
-                placeholderTextColor={colors.textTertiary}
-                keyboardType="number-pad"
-                maxLength={19}
-              />
-
-              <View style={styles.btnRow}>
-                <View style={styles.flex}>
-                  <Text style={styles.inputLabel}>Son Kullanma Ay</Text>
-                  <TextInput
-                    style={styles.cardInput}
-                    value={cardMonth}
-                    onChangeText={(t) => setCardMonth(t.replace(/\D/g, "").slice(0, 2))}
-                    placeholder="AA"
-                    placeholderTextColor={colors.textTertiary}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                  />
-                </View>
-                <View style={styles.flex}>
-                  <Text style={styles.inputLabel}>Yıl</Text>
-                  <TextInput
-                    style={styles.cardInput}
-                    value={cardYear}
-                    onChangeText={(t) => setCardYear(t.replace(/\D/g, "").slice(0, 4))}
-                    placeholder="YYYY"
-                    placeholderTextColor={colors.textTertiary}
-                    keyboardType="number-pad"
-                    maxLength={4}
-                  />
-                </View>
-                <View style={[styles.flex, { flex: 0.8 }]}>
-                  <Text style={styles.inputLabel}>CVC</Text>
-                  <TextInput
-                    style={styles.cardInput}
-                    value={cardCvc}
-                    onChangeText={(t) => setCardCvc(t.replace(/\D/g, "").slice(0, 3))}
-                    placeholder="***"
-                    placeholderTextColor={colors.textTertiary}
-                    keyboardType="number-pad"
-                    secureTextEntry
-                    maxLength={3}
-                  />
-                </View>
-              </View>
-
-              <Text style={styles.secureNote}>{"🔒 Ödeme Iyzico altyapısıyla güvenle işlenir · Kart bilgileri PISP'te saklanmaz"}</Text>
-
-              <Pressable
-                style={[styles.payBtn, paymentLoading && styles.payBtnLoading]}
-                disabled={paymentLoading}
-                onPress={() => { void handleCardPayment(); }}
-              >
-                {paymentLoading
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.payBtnText}>Ödeme Yap — {selectedPackage?.fallbackPrice}</Text>}
-              </Pressable>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
 
     </ScrollView>
   );
