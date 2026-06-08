@@ -37,34 +37,41 @@ export async function loadPrivateVault(): Promise<PrivateVaultSnapshot> {
 
   const encrypted = await AsyncStorage.getItem(STORAGE_KEY);
   if (!encrypted) {
-    return createDefaultSnapshot(false);
+    return createDefaultSnapshot(hasOnboarded);
   }
 
   try {
     const json = CryptoJS.AES.decrypt(encrypted, encryptionKey).toString(CryptoJS.enc.Utf8);
     if (!json) {
-      // Data exists but can't decrypt — key changed; skip onboarding anyway
+      // Decryption failed (key changed or corrupted) — try plain JSON fallback
+      try {
+        const parsed = JSON.parse(encrypted) as Partial<PrivateVaultSnapshot>;
+        if (parsed && typeof parsed === "object") return mergeSnapshot(parsed, hasOnboarded);
+      } catch { /* not plain JSON either */ }
       return createDefaultSnapshot(hasOnboarded);
     }
-    const parsed = JSON.parse(json) as Partial<PrivateVaultSnapshot>;
-    return {
-      vaultValues: { ...initialVaultValues, ...parsed.vaultValues },
-      policy: { ...initialPolicy, ...parsed.policy },
-      shareCounts: { ...initialShareCounts, ...parsed.shareCounts },
-      receipts: Array.isArray(parsed.receipts) ? parsed.receipts : [],
-      customTemplates: Array.isArray(parsed.customTemplates) ? parsed.customTemplates : [],
-      onboardingAccepted: hasOnboarded || Boolean(parsed.onboardingAccepted),
-      tokenBalance: typeof parsed.tokenBalance === "number" ? parsed.tokenBalance : 0,
-      isPremium: Boolean(parsed.isPremium),
-      tokenHistory: Array.isArray(parsed.tokenHistory) ? parsed.tokenHistory : [],
-      acceptedOfferIds: Array.isArray(parsed.acceptedOfferIds) ? parsed.acceptedOfferIds : [],
-      scannedOffers: Array.isArray(parsed.scannedOffers) ? parsed.scannedOffers : [],
-      documents: Array.isArray(parsed.documents) ? parsed.documents : [],
-      updatedAt: parsed.updatedAt ?? new Date().toISOString()
-    };
+    return mergeSnapshot(JSON.parse(json) as Partial<PrivateVaultSnapshot>, hasOnboarded);
   } catch {
     return createDefaultSnapshot(hasOnboarded);
   }
+}
+
+function mergeSnapshot(parsed: Partial<PrivateVaultSnapshot>, hasOnboarded: boolean): PrivateVaultSnapshot {
+  return {
+    vaultValues: { ...initialVaultValues, ...parsed.vaultValues },
+    policy: { ...initialPolicy, ...parsed.policy },
+    shareCounts: { ...initialShareCounts, ...parsed.shareCounts },
+    receipts: Array.isArray(parsed.receipts) ? parsed.receipts : [],
+    customTemplates: Array.isArray(parsed.customTemplates) ? parsed.customTemplates : [],
+    onboardingAccepted: hasOnboarded || Boolean(parsed.onboardingAccepted),
+    tokenBalance: typeof parsed.tokenBalance === "number" ? parsed.tokenBalance : 0,
+    isPremium: Boolean(parsed.isPremium),
+    tokenHistory: Array.isArray(parsed.tokenHistory) ? parsed.tokenHistory : [],
+    acceptedOfferIds: Array.isArray(parsed.acceptedOfferIds) ? parsed.acceptedOfferIds : [],
+    scannedOffers: Array.isArray(parsed.scannedOffers) ? parsed.scannedOffers : [],
+    documents: Array.isArray(parsed.documents) ? parsed.documents : [],
+    updatedAt: parsed.updatedAt ?? new Date().toISOString()
+  };
 }
 
 export async function savePrivateVault(snapshot: PrivateVaultSnapshot) {

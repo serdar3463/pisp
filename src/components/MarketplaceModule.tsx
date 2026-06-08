@@ -176,8 +176,12 @@ export function MarketplaceModule(props: Props) {
   useEffect(() => {
     const skus = TOKEN_PACKAGES.map((p) => p.sku);
     initConnection()
-      .then(() => fetchProducts({ skus }))
-      .then((products) => { setIapProducts(products as ProductIOS[]); setIapReady(true); })
+      .then(() => fetchProducts({ skus, type: "in-app" }))
+      .then((products) => {
+        const list = products as ProductIOS[];
+        setIapProducts(list);
+        setIapReady(list.length > 0);
+      })
       .catch(() => setIapReady(false));
 
     const updateSub = purchaseUpdatedListener(async (purchase: Purchase) => {
@@ -983,6 +987,12 @@ export function MarketplaceModule(props: Props) {
             </View>
             <Text style={styles.buySubtitle}>Paket seç — Apple Pay ile güvenle öde — tokenlar anında gelir.</Text>
 
+            {!iapReady && (
+              <View style={styles.iapErrorBox}>
+                <Text style={styles.iapErrorText}>Ürünler yüklenemedi. App Store bağlantısını kontrol et ve tekrar dene.</Text>
+              </View>
+            )}
+
             <View style={styles.packageGrid}>
               {TOKEN_PACKAGES.map((pkg) => (
                 <Pressable
@@ -1291,6 +1301,8 @@ const styles = StyleSheet.create({
   payBtnLoading: { opacity: 0.7 },
   payBtnText: { color: colors.white, fontSize: 15, fontWeight: "800" },
   secureNote: { ...typography.caption, color: colors.textTertiary, textAlign: "center" },
+  iapErrorBox: { backgroundColor: colors.dangerDim, borderColor: colors.danger, borderRadius: radius.md, borderWidth: 1, marginBottom: spacing.md, padding: spacing.md },
+  iapErrorText: { ...typography.caption, color: colors.danger, textAlign: "center" },
 
   // Modals
   overlay: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.7)", flex: 1, justifyContent: "center", padding: spacing.xl },

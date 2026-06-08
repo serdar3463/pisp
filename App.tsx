@@ -101,13 +101,14 @@ function RootApp() {
   const preview = useMemo(() => createDisclosurePreview(selectedTemplate ?? EMPTY_TEMPLATE, policy, vaultValues, policyContext), [policy, policyContext, selectedTemplate, vaultValues]);
 
   const toast = useToast();
-
+  const loadOkRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
     loadPrivateVault()
       .then((snapshot) => {
         if (!mounted) return;
+        loadOkRef.current = true;
         setVaultValues(snapshot.vaultValues);
         setPolicy(snapshot.policy);
         setShareCounts(snapshot.shareCounts);
@@ -127,7 +128,7 @@ function RootApp() {
   }, []);
 
   useEffect(() => {
-    if (!storageReady) return;
+    if (!storageReady || !loadOkRef.current) return;
     const snapshot: PrivateVaultSnapshot = { vaultValues, policy, shareCounts, receipts, customTemplates, onboardingAccepted, tokenBalance, isPremium, tokenHistory, acceptedOfferIds, scannedOffers, documents, updatedAt: new Date().toISOString() };
     const timeout = setTimeout(() => { void savePrivateVault(snapshot); }, 350);
     return () => clearTimeout(timeout);
