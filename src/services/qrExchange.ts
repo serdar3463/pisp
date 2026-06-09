@@ -13,55 +13,38 @@ import { getOrCreateDeviceIdentity, omitSignature, signPayload, verifyPayloadSig
 export type QRRequest = {
   protocol: "pisp.exchange.request.v1";
   requestId: string;
-  requesterDid: string;
   requesterPublicKey: string;
   templateId: string;
   purpose: string;
   recipient: string;
   requestedFieldIds: string[];
   expiresAt: string;
-  nonce: string;
   signature: string;
 };
 
 export type QRDisclosureResponse = {
   protocol: "pisp.exchange.response.v1";
   requestId: string;
-  holderDid: string;
   holderPublicKey: string;
   disclosureHash: string;
   disclosedClaims: Record<string, string>;
   withheldCount: number;
-  policy: {
-    purpose: string;
-    recipient: string;
-    expiryDays: number;
-    usageLimit: number;
-    retentionDays: number;
-  };
-  warning: string;
   signature: string;
 };
 
 export async function createQRRequest(template: Template, context: PolicyContext): Promise<QRRequest> {
   const now = Date.now();
   const identity = await getOrCreateDeviceIdentity();
-  const nonce = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    `${template.id}:${context.recipient}:${now}:${Math.random()}`
-  );
 
   const unsigned: Omit<QRRequest, "signature"> = {
     protocol: "pisp.exchange.request.v1",
-    requestId: `pisp-req-${now}`,
-    requesterDid: identity.did,
+    requestId: `r${now}`,
     requesterPublicKey: identity.publicKey,
     templateId: template.id,
     purpose: context.purpose,
     recipient: context.recipient,
     requestedFieldIds: template.fieldIds,
     expiresAt: new Date(now + context.expiryDays * 24 * 60 * 60 * 1000).toISOString(),
-    nonce
   };
   return {
     ...unsigned,
@@ -91,6 +74,7 @@ export function parseQRRequest(value: string): QRRequest | null {
     return null;
   }
 }
+
 
 export function verifyQRRequest(request: QRRequest) {
   const isSigned = verifyPayloadSignature(omitSignature(request), request.signature, request.requesterPublicKey);
@@ -133,19 +117,10 @@ export async function createDisclosureResponse(params: {
   const unsigned: Omit<QRDisclosureResponse, "signature"> = {
     protocol: "pisp.exchange.response.v1",
     requestId: request.requestId,
-    holderDid: identity.did,
     holderPublicKey: identity.publicKey,
     disclosureHash,
     disclosedClaims,
     withheldCount: preview.withheldClaims,
-    policy: {
-      purpose: request.purpose,
-      recipient: request.recipient,
-      expiryDays: context.expiryDays,
-      usageLimit: context.usageLimit,
-      retentionDays: context.retentionDays
-    },
-    warning: "Yalnızca kullanıcının yerel politikasının onayladığı bilgiler dahil edilir."
   };
   return {
     ...unsigned,

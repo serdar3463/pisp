@@ -180,9 +180,9 @@ export function MarketplaceModule(props: Props) {
       .then((products) => {
         const list = products as ProductIOS[];
         setIapProducts(list);
-        setIapReady(list.length > 0);
+        setIapReady(true);
       })
-      .catch(() => setIapReady(false));
+      .catch(() => setIapReady(true));
 
     const updateSub = purchaseUpdatedListener(async (purchase: Purchase) => {
       const pkg = pendingPkgRef.current ?? TOKEN_PACKAGES.find((p) => p.sku === purchase.productId);
@@ -986,12 +986,6 @@ export function MarketplaceModule(props: Props) {
               </Pressable>
             </View>
             <Text style={styles.buySubtitle}>Paket seç — Apple Pay ile güvenle öde — tokenlar anında gelir.</Text>
-
-            {!iapReady && (
-              <View style={styles.iapErrorBox}>
-                <Text style={styles.iapErrorText}>Ürünler yüklenemedi. App Store bağlantısını kontrol et ve tekrar dene.</Text>
-              </View>
-            )}
 
             <View style={styles.packageGrid}>
               {TOKEN_PACKAGES.map((pkg) => (

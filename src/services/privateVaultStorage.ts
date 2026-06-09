@@ -1,5 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import CryptoJS from "crypto-js";
 
@@ -23,37 +22,59 @@ export type PrivateVaultSnapshot = {
   updatedAt: string;
 };
 
-const STORAGE_KEY = "pisp.privateVault.v1";
-const KEY_ID = "pisp.localEncryptionKey.v1";
-// Separate plain key so onboarding status survives encryption key changes
+// v2 = plain JSON (reliable). v1 = legacy encrypted (migration only).
+const STORAGE_KEY = "pisp.privateVault.v2";
+const LEGACY_KEY = "pisp.privateVault.v1";
+const LEGACY_ENC_KEY_ID = "pisp.localEncryptionKey.v1";
 const ONBOARDING_FLAG_KEY = "pisp.onboarding.v1";
 
 export async function loadPrivateVault(): Promise<PrivateVaultSnapshot> {
-  const [encryptionKey, onboardingFlag] = await Promise.all([
-    getOrCreateEncryptionKey(),
-    AsyncStorage.getItem(ONBOARDING_FLAG_KEY),
-  ]);
+  const onboardingFlag = await AsyncStorage.getItem(ONBOARDING_FLAG_KEY);
   const hasOnboarded = onboardingFlag === "true";
 
-  const encrypted = await AsyncStorage.getItem(STORAGE_KEY);
-  if (!encrypted) {
-    return createDefaultSnapshot(hasOnboarded);
+  // Try v2 (plain JSON) first
+  const stored = await AsyncStorage.getItem(STORAGE_KEY);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored) as Partial<PrivateVaultSnapshot>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return mergeSnapshot(parsed, hasOnboarded);
+      }
+    } catch { /* corrupted, fall through */ }
   }
 
-  try {
-    const json = CryptoJS.AES.decrypt(encrypted, encryptionKey).toString(CryptoJS.enc.Utf8);
-    if (!json) {
-      // Decryption failed (key changed or corrupted) — try plain JSON fallback
-      try {
-        const parsed = JSON.parse(encrypted) as Partial<PrivateVaultSnapshot>;
-        if (parsed && typeof parsed === "object") return mergeSnapshot(parsed, hasOnboarded);
-      } catch { /* not plain JSON either */ }
-      return createDefaultSnapshot(hasOnboarded);
-    }
-    return mergeSnapshot(JSON.parse(json) as Partial<PrivateVaultSnapshot>, hasOnboarded);
-  } catch {
-    return createDefaultSnapshot(hasOnboarded);
+  // Try v1 migration (legacy encrypted)
+  const legacy = await AsyncStorage.getItem(LEGACY_KEY);
+  if (legacy) {
+    try {
+      const encKey = await SecureStore.getItemAsync(LEGACY_ENC_KEY_ID);
+      if (encKey) {
+        const json = CryptoJS.AES.decrypt(legacy, encKey).toString(CryptoJS.enc.Utf8);
+        if (json) {
+          const parsed = JSON.parse(json) as Partial<PrivateVaultSnapshot>;
+          const snapshot = mergeSnapshot(parsed, hasOnboarded);
+          // Migrate to v2
+          await savePrivateVault(snapshot);
+          await AsyncStorage.removeItem(LEGACY_KEY);
+          return snapshot;
+        }
+      }
+    } catch { /* legacy unreadable, ignore */ }
   }
+
+  return createDefaultSnapshot(hasOnboarded);
+}
+
+export async function savePrivateVault(snapshot: PrivateVaultSnapshot) {
+  const payload: PrivateVaultSnapshot = { ...snapshot, updatedAt: new Date().toISOString() };
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  if (snapshot.onboardingAccepted) {
+    await AsyncStorage.setItem(ONBOARDING_FLAG_KEY, "true");
+  }
+}
+
+export async function clearPrivateVault() {
+  await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_KEY]);
 }
 
 function mergeSnapshot(parsed: Partial<PrivateVaultSnapshot>, hasOnboarded: boolean): PrivateVaultSnapshot {
@@ -74,24 +95,6 @@ function mergeSnapshot(parsed: Partial<PrivateVaultSnapshot>, hasOnboarded: bool
   };
 }
 
-export async function savePrivateVault(snapshot: PrivateVaultSnapshot) {
-  const encryptionKey = await getOrCreateEncryptionKey();
-  const payload: PrivateVaultSnapshot = {
-    ...snapshot,
-    updatedAt: new Date().toISOString()
-  };
-  const encrypted = CryptoJS.AES.encrypt(JSON.stringify(payload), encryptionKey).toString();
-  await AsyncStorage.setItem(STORAGE_KEY, encrypted);
-  // Persist onboarding flag independently — survives encryption key rotation
-  if (snapshot.onboardingAccepted) {
-    await AsyncStorage.setItem(ONBOARDING_FLAG_KEY, "true");
-  }
-}
-
-export async function clearPrivateVault() {
-  await AsyncStorage.removeItem(STORAGE_KEY);
-}
-
 function createDefaultSnapshot(onboardingAccepted: boolean): PrivateVaultSnapshot {
   return {
     vaultValues: initialVaultValues,
@@ -108,20 +111,4 @@ function createDefaultSnapshot(onboardingAccepted: boolean): PrivateVaultSnapsho
     documents: [],
     updatedAt: new Date().toISOString()
   };
-}
-
-async function getOrCreateEncryptionKey() {
-  const existing = await SecureStore.getItemAsync(KEY_ID);
-  if (existing) {
-    return existing;
-  }
-
-  const random = await Crypto.getRandomBytesAsync(32);
-  const key = Array.from(random)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  await SecureStore.setItemAsync(KEY_ID, key, {
-    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
-  });
-  return key;
 }

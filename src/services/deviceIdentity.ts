@@ -12,9 +12,9 @@ export type DeviceIdentity = {
 export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
   const seed = await getOrCreateSeed();
   const keyPair = nacl.sign.keyPair.fromSeed(hexToBytes(seed));
-  const publicKey = bytesToHex(keyPair.publicKey);
+  const publicKey = bytesToBase64(keyPair.publicKey);
   return {
-    did: `did:pisp:${publicKey.slice(0, 32)}`,
+    did: `did:pisp:${bytesToHex(keyPair.publicKey).slice(0, 32)}`,
     publicKey
   };
 }
@@ -23,12 +23,16 @@ export async function signPayload(payload: unknown) {
   const seed = await getOrCreateSeed();
   const keyPair = nacl.sign.keyPair.fromSeed(hexToBytes(seed));
   const message = stringToBytes(canonicalStringify(payload));
-  return bytesToHex(nacl.sign.detached(message, keyPair.secretKey));
+  return bytesToBase64(nacl.sign.detached(message, keyPair.secretKey));
 }
 
 export function verifyPayloadSignature(payload: unknown, signature: string, publicKey: string) {
   try {
-    return nacl.sign.detached.verify(stringToBytes(canonicalStringify(payload)), hexToBytes(signature), hexToBytes(publicKey));
+    return nacl.sign.detached.verify(
+      stringToBytes(canonicalStringify(payload)),
+      base64ToBytes(signature),
+      base64ToBytes(publicKey)
+    );
   } catch {
     return false;
   }
@@ -87,4 +91,12 @@ function hexToBytes(hex: string) {
     bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return bytes;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 }
