@@ -41,7 +41,7 @@ const FALLBACK_RESPONSES: [RegExp, string][] = [
   [/paylaş|qr|kod/i, "Paylaş sekmesinden şablon seçerek QR kodu oluşturabilirsiniz. Yalnızca izin verdiğiniz bilgiler paylaşılır."],
   [/pazar|teklif|şirket/i, "Pazar sekmesinde şirket tekliflerini görebilir, QR okutarak yeni teklifler ekleyebilir ve tokenlarınızı yönetebilirsiniz."],
   [/çek|para|iban|nakit/i, "Minimum 500 💎 bakiyeyle IBAN'ınıza çekim yapabilirsiniz. Pazar sekmesindeki '💳 Çevir' butonunu kullanın."],
-  [/satın|al|ödeme|kart/i, "Token satın almak için Pazar sekmesindeki '+ Token Satın Al' butonuna tıklayın. Güvenli kart ödemesiyle hızlıca token alabilirsiniz."],
+  [/satın|al|ödeme|kart/i, "Token satın almak için Pazar sekmesindeki '+ Token Satın Al' butonuna tıklayın. Apple Pay ile güvenle ödeme yapabilirsiniz."],
 ];
 
 function getFallback(question: string): string {

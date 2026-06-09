@@ -369,7 +369,7 @@ function RootApp() {
           <Text style={styles.splashTitle}>PISP</Text>
           <Text style={styles.splashSub}>Kasa hazırlanıyor...</Text>
           <View style={styles.splashBadge}>
-            <Text style={styles.splashVersion}>v1.0.0</Text>
+            <Text style={styles.splashVersion}>v1.0.6</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -688,7 +688,7 @@ function OnboardingScreen({ onAccept }: { onAccept: () => void }) {
         </View>
 
         <Text style={styles.onboardFooter}>
-          Hiçbir verin sunucuya gitmez · KVKK & GDPR uyumlu · v1.0.0
+          Hiçbir verin sunucuya gitmez · KVKK & GDPR uyumlu · v1.0.6
         </Text>
       </ScrollView>
     </SafeAreaView>
