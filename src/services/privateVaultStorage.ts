@@ -74,7 +74,7 @@ export async function savePrivateVault(snapshot: PrivateVaultSnapshot) {
 }
 
 export async function clearPrivateVault() {
-  await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_KEY]);
+  await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_KEY, ONBOARDING_FLAG_KEY]);
 }
 
 function mergeSnapshot(parsed: Partial<PrivateVaultSnapshot>, hasOnboarded: boolean): PrivateVaultSnapshot {

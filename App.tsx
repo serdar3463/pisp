@@ -297,6 +297,7 @@ function RootApp() {
     setIsPremium(false);
     setTokenHistory([]);
     setAcceptedOfferIds([]);
+    setScannedOffers([]);
     setDocuments([]);
     setOnboardingAccepted(false);
   }
@@ -612,7 +613,7 @@ function OnboardingScreen({ onAccept }: { onAccept: () => void }) {
             <View style={styles.onboardFeatures}>
               <View style={styles.featureRow}>
                 <Text style={styles.featureIcon}>✅</Text>
-                <Text style={styles.featureText}>AES-256 şifreleme aktif</Text>
+                <Text style={styles.featureText}>Veri güvenliği aktif</Text>
               </View>
               <View style={styles.featureRow}>
                 <Text style={styles.featureIcon}>
