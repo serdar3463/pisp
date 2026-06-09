@@ -26,6 +26,7 @@ import { MarketplaceModule } from "./src/components/MarketplaceModule";
 import { getBiometricStatus } from "./src/services/appLock";
 import {
   PrivateVaultSnapshot,
+  VaultKeyUnavailableError,
   clearPrivateVault,
   loadPrivateVault,
   savePrivateVault
@@ -90,6 +91,8 @@ function RootApp() {
   const [documents, setDocuments] = useState<StoredDocument[]>([]);
   const [onboardingAccepted, setOnboardingAccepted] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
+  const [vaultKeyUnavailable, setVaultKeyUnavailable] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [showAgent, setShowAgent] = useState(false);
 
   const allTemplates = useMemo(() => customTemplates, [customTemplates]);
@@ -105,6 +108,7 @@ function RootApp() {
 
   useEffect(() => {
     let mounted = true;
+    setVaultKeyUnavailable(false);
     loadPrivateVault()
       .then((snapshot) => {
         if (!mounted) return;
@@ -123,9 +127,15 @@ function RootApp() {
         setOnboardingAccepted(snapshot.onboardingAccepted);
         setStorageReady(true);
       })
-      .catch(() => { if (mounted) setStorageReady(true); });
+      .catch((e) => {
+        if (!mounted) return;
+        if (e instanceof VaultKeyUnavailableError) {
+          setVaultKeyUnavailable(true);
+        }
+        setStorageReady(true);
+      });
     return () => { mounted = false; };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     if (!storageReady || !loadOkRef.current) return;
@@ -357,6 +367,32 @@ function RootApp() {
     setDisclosureResponse(response);
     setLedger((current) => [...current, block]);
     setShareCounts((current) => ({ ...current, [template.id]: (current[template.id] ?? 0) + 1 }));
+  }
+
+  if (vaultKeyUnavailable) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
+        <View style={styles.splashShell}>
+          <View style={[styles.splashLogo, { backgroundColor: colors.warning }]}>
+            <Text style={styles.splashLogoText}>🔐</Text>
+          </View>
+          <Text style={styles.splashTitle}>Kasa Kilitli</Text>
+          <Text style={[styles.splashSub, { textAlign: "center" }]}>
+            Güvenlik anahtarı şu an erişilemiyor.{"\n"}Cihazınızın kilidini açık tutun ve tekrar deneyin.
+          </Text>
+          <Pressable
+            style={[styles.unlockBtn, { marginTop: spacing.xl, width: "100%" }]}
+            onPress={() => {
+              setStorageReady(false);
+              setLoadAttempt(n => n + 1);
+            }}
+          >
+            <Text style={styles.unlockBtnText}>Tekrar Dene</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   if (!storageReady) {
